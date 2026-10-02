@@ -1,0 +1,5 @@
+[[
+  { "id": 900, "node_id": "PRR_x", "state": "PENDING", "user": { "login": "someone-else" }, "body": "" },
+  { "id": 901, "node_id": "PRR_me", "state": "PENDING", "user": { "login": "me" }, "body": "Overall fine." },
+  { "id": 800, "state": "COMMENTED", "user": { "login": "me" } }
+]]

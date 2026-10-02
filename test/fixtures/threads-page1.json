@@ -1,0 +1,10 @@
+{"data":{"repository":{"pullRequest":{"reviewThreads":{
+  "pageInfo":{"hasNextPage":true,"endCursor":"C1"},
+  "nodes":[
+    {"id":"PRRT_a","isResolved":true,"isOutdated":false,"path":"src/a.js","line":3,"originalLine":3,
+     "comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":11,"author":{"login":"ana-ng"},"createdAt":"2026-09-01T10:00:00Z","body":"done?","url":"https://github.com/octo-org/example/pull/3#discussion_r11"}]}},
+    {"id":"PRRT_b","isResolved":false,"isOutdated":true,"path":"src/b.js","line":null,"originalLine":40,
+     "comments":{"pageInfo":{"hasNextPage":false},"nodes":[
+       {"databaseId":21,"author":{"login":"ana-ng"},"createdAt":"2026-09-01T10:00:00Z","body":"Why `null`?","url":"https://github.com/octo-org/example/pull/3#discussion_r21"},
+       {"databaseId":22,"author":null,"createdAt":"2026-09-01T11:00:00Z","body":"ghost reply","url":"https://github.com/octo-org/example/pull/3#discussion_r22"}]}}
+  ]}}}}}

@@ -1,0 +1,4 @@
+[[
+  { "id": 5001, "node_id": "PRRC_1", "path": "src/a.js", "line": null, "original_line": 12, "start_line": null, "side": "RIGHT", "position": 4, "body": "Rename this?" },
+  { "id": 5002, "node_id": "PRRC_2", "path": "src/b.js", "line": 7, "original_line": 7, "start_line": 5, "side": "RIGHT", "position": 9, "body": "Extract a helper." }
+]]

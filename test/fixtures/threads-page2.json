@@ -1,0 +1,6 @@
+{"data":{"repository":{"pullRequest":{"reviewThreads":{
+  "pageInfo":{"hasNextPage":false,"endCursor":"C2"},
+  "nodes":[
+    {"id":"PRRT_c","isResolved":false,"isOutdated":false,"path":"docs/c.md","line":9,"originalLine":9,
+     "comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":31,"author":{"login":"jkim"},"createdAt":"2026-09-02T09:00:00Z","body":"Typo here.","url":"https://github.com/octo-org/example/pull/3#discussion_r31"}]}}
+  ]}}}}}
