@@ -25,6 +25,8 @@ You need:
 - The GitHub CLI `gh`, version 2.48.0 or newer, logged in (`gh auth status`). Second Chair makes every GitHub call through it.
 - A user script manager: Tampermonkey or Violentmonkey in Chrome, Edge or Firefox, or Tampermonkey in Safari. See [Browser setup](#browser-setup).
 
+Windows works with Node 22 or newer and Git for Windows. Claude Code's Bash tool runs in Git Bash there. `npm install -g` creates a `second-chair` command on Windows too.
+
 Then:
 
 1. Install the plugin in Claude Code:
@@ -160,9 +162,9 @@ With the plugin alone, these commands run inside Claude Code. See [Where the com
 
 | Command | What it does |
 |:--|:--|
-| `second-chair start [--quiet]` | Starts the server in the background, unless one already answers on the port. Writes a pid file and a log to the data directory. |
+| `second-chair start [--quiet]` | Starts the server in the background, unless one of the same version already answers on the port. Restarts a server of another version that `start` launched. The server writes a pid file and a log to the data directory. |
 | `second-chair stop` | Stops the server that `start` started. It signals nothing when the server on the port has another process id. |
-| `second-chair doctor` | Checks Node, `gh`, the server and the port. Prints the userscript address and what to fix. |
+| `second-chair doctor` | Checks Node, `gh`, the server, its version and the port. Prints the userscript address and what to fix. |
 | `second-chair serve [--port N]` | Runs the server in the foreground. |
 | `second-chair threads [PR]` | Prints the unresolved review threads as JSON. Your own pending comments are left out. |
 | `second-chair pending [PR]` | Prints your pending review and its comments as JSON, or `null`. |
@@ -245,6 +247,18 @@ Both blocks write the full paths of `node` and `second-chair` into the service f
 With the service running, the hook finds the server and starts nothing. `second-chair stop` does not stop a service. Use `systemctl --user stop second-chair` on Linux, or `launchctl bootout gui/$(id -u)/io.github.patras3.second-chair` on macOS.
 
 The server is reachable only from the machine it runs on. A server started inside a container is reachable from the host's browser only when the container shares the host network (for example `docker run --network host`).
+
+## Several sessions and repositories
+
+One Second Chair server runs per machine. Every Claude Code session shares it, in every repository. The first session starts it, and later sessions find it running.
+
+The server keeps its data per repository and pull request. Sessions that work on different pull requests do not get in each other's way.
+
+When several sessions start at the same moment, each one tries to start a server. One server gets the port, and every session uses it.
+
+After a plugin update, the next session restarts the server, so the new version runs. A server that `second-chair start` did not launch, such as a service, is left alone. The session then prints a line that asks you to stop that server by hand.
+
+A container that shares the host network (for example `docker run --network host`) shares the server too.
 
 ## Troubleshooting
 

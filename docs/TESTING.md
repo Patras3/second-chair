@@ -90,6 +90,8 @@ Use a pull request by another account.
 ### Server
 
 - [ ] Write the pid of another running process into `server.pid` in the data directory, with the server running. `second-chair stop` says the server is not the one `start` launched. Both processes keep running.
+- [ ] With no server running, start two Claude Code sessions at the same moment. One server runs. The pid in `server.pid` equals the `pid` that `curl http://127.0.0.1:7788/health` prints. `second-chair stop` stops it.
+- [ ] With the server of the previous version running, update the plugin and start a new session. `curl http://127.0.0.1:7788/health` prints the new `version` and a new `pid`.
 
 ### Other systems
 
