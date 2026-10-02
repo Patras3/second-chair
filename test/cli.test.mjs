@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:net';
 import { probe } from '../lib/daemon.mjs';
@@ -67,6 +67,41 @@ test('doctor lists each check with ok or a fix', async () => {
     assert.match(r.stdout, /server .* not running.*second-chair start/);
     assert.match(r.stdout, /userscript .*http:\/\/127\.0\.0\.1:\d+\/second-chair\.user\.js/);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('doctor tells a port held by another program from a stopped server', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const blocker = createServer((c) => {
+    c.on('error', () => {});
+    c.end('HTTP/1.1 200 OK\r\n\r\nnot us');
+  });
+  await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(blocker.address().port) };
+  try {
+    const r = await run(process.execPath, [BIN, 'doctor'], { env }).catch((e) => e);
+    assert.equal(r.code, 1);
+    assert.match(r.stdout, /server .*port \d+ is in use by another program; set SECOND_CHAIR_PORT/);
+    assert.doesNotMatch(r.stdout, /run: second-chair start/);
+  } finally {
+    blocker.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('stop does not signal a stale pid file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(await freePort()) };
+  const bystander = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
+  try {
+    await writeFile(join(root, 'server.pid'), String(bystander.pid));
+    const r = await run(process.execPath, [BIN, 'stop'], { env });
+    assert.match(r.stdout, /stale pid file/);
+    assert.equal(bystander.exitCode, null);
+    assert.equal(await readFile(join(root, 'server.pid'), 'utf8').catch(() => 'gone'), 'gone');
+  } finally {
+    bystander.kill();
     await rm(root, { recursive: true, force: true });
   }
 });
