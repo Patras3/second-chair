@@ -168,3 +168,19 @@ test('a repo or round that could leave the data directory is refused', async () 
   // Dots inside a name are fine.
   assert.equal((await call('PUT', '/api/proposals', proposals({ repo: 'octo.org/ex.ample', pr: 41 }))).status, 200);
 });
+
+test('a body over 5 MB gets a 413 answer, with or without a Content-Length', async () => {
+  const big = Buffer.alloc(6 * 1024 * 1024, 'a');
+  for (const chunked of [false, true]) {
+    const status = await new Promise((resolve, reject) => {
+      const headers = { 'Content-Type': 'application/json', 'X-Second-Chair': '1', ...(chunked ? {} : { 'Content-Length': big.length }) };
+      const req = request({ host: '127.0.0.1', port, method: 'PUT', path: '/api/proposals', headers }, (res) => { res.resume(); resolve(res.statusCode); });
+      req.on('error', reject);
+      if (chunked) for (let i = 0; i < big.length; i += 1024 * 1024) req.write(big.subarray(i, i + 1024 * 1024));
+      else req.write(big);
+      req.end();
+    });
+    assert.equal(status, 413, chunked ? 'chunked' : 'with Content-Length');
+  }
+  assert.equal((await call('GET', '/api/status')).status, 200, 'the server still answers');
+});
