@@ -61,6 +61,8 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await page.waitForSelector(card('T1'));
   check((await page.locator('.sc-card[data-sc-where=inline]').count()) === 4, 'cards for the four loaded threads; none for the general item or the unloaded one');
   check((await page.textContent('.sc-toggle')).includes('3/6'), 'the three auto items count as decided');
+  check(await page.locator('.sc-toggle > svg.sc-logo[aria-hidden=true]').count() === 1 && (await page.getAttribute('.sc-toggle', 'aria-label')) === 'Second Chair', 'the pill shows the chair mark and has an accessible name');
+  check(await page.locator(`${card('T1')} .sc-card-head svg.sc-logo`).count() === 1, 'the card header shows the chair mark');
   check(await page.locator(`${card('T1')} .sc-md li`).count() === 2, 'the reply renders as markdown');
   check(await page.locator(`${card('T1')} .sc-foryou strong`).count() === 1, 'the context renders as markdown');
   check(await page.locator(`${card('T3')}.sc-compact`).count() === 1, 'an auto card is compact');

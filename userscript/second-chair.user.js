@@ -2,6 +2,7 @@
 // @name         Second Chair
 // @namespace    https://github.com/Patras3/second-chair
 // @version      1.0.0
+// @icon         data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%20fill=%22none%22%20stroke=%22%231f2328%22%20stroke-width=%221.5%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22%3E%3Cpath%20d=%22M5.75%201.75%205.25%209.25M3.75%209.25h8.5M5.25%209.25l-1%205M11%209.25l1%205%22/%3E%3C/svg%3E
 // @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*
 // @require      https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js
@@ -30,6 +31,9 @@
 const SC_TOOL = 'second-chair';
 const SC_FINAL_ROUND = 2;
 const SC_SERVER = 'http://127.0.0.1:7788';
+
+// The mark: one chair seen from the side. It draws in the current text colour, so it follows light and dark.
+const SC_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="sc-logo" aria-hidden="true"><path d="M5.75 1.75 5.25 9.25M3.75 9.25h8.5M5.25 9.25l-1 5M11 9.25l1 5"/></svg>';
 
 // Decision buttons per mode and round. `reply` answers the threads on your own pull request; `review`
 // decides the comments of a pending review you are about to submit. A decision with `needsNote` counts
@@ -339,7 +343,7 @@ function buildCard(state, item, where, view = {}) {
   const hidden = view.hidden ? '<span class="sc-label" title="GitHub has not loaded this thread on the page">hidden</span>' : '';
   const cls = `sc-card${e.decision && !missingNote(state, item) ? ' sc-decided' : ''}${compact ? ' sc-compact' : ''}`;
   const open = `<div class="${cls}" data-sc-card="${id}" data-sc-where="${where}">`;
-  const mark = '<span class="sc-mark" aria-hidden="true">SC</span>';
+  const mark = SC_LOGO;
   if (compact) {
     const first = String(d.reply || field(item, 'summary')).split('\n').find((l) => l.trim()) ?? '';
     const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(p, e.decision))}</span>` : '';
@@ -433,7 +437,7 @@ function buildFilterBar(state, filterKey) {
 }
 
 const SC_CSS = `
-.sc-toggle{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;align-items:center;gap:6px;height:32px;padding:0 12px 0 6px;border-radius:16px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);font:600 12px/1 -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:var(--shadow-floating-small,0 2px 8px rgba(0,0,0,.15))}
+.sc-toggle{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;align-items:center;gap:6px;height:32px;padding:0 12px 0 10px;border-radius:16px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);font:600 12px/1 -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:var(--shadow-floating-small,0 2px 8px rgba(0,0,0,.15))}
 .sc-toggle.sc-complete{color:var(--fgColor-success,#1a7f37);border-color:var(--fgColor-success,#1a7f37)}
 .sc-panel{position:fixed;top:0;right:0;bottom:0;width:min(440px,92vw);z-index:9998;display:flex;flex-direction:column;background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);border-left:1px solid var(--borderColor-default,#d0d7de);box-shadow:var(--shadow-floating-large,-4px 0 16px rgba(0,0,0,.12));font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
 .sc-panel.sc-wide{width:50vw}.sc-panel[hidden]{display:none}
@@ -483,7 +487,8 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-card-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;background:var(--sc-subtle);border-bottom:1px solid var(--sc-border);font-size:13px}
 .sc-head-right{margin-left:auto;display:flex;gap:10px;font-size:12px}
 .sc-head-right a{text-decoration:none}
-.sc-mark{width:20px;height:20px;border-radius:50%;flex:none;display:inline-grid;place-items:center;background:var(--fgColor-default,#1f2328);color:var(--sc-canvas);font:700 9px/1 system-ui}
+.sc-logo{width:16px;height:16px;flex:none}
+.sc-panel-head .sc-logo{width:18px;height:18px}
 .sc-muted{color:var(--sc-muted)}
 .sc-label{display:inline-block;font:500 12px/18px -apple-system,system-ui,sans-serif;padding:0 7px;border-radius:2em;border:1px solid var(--sc-border);color:var(--sc-muted)}
 .sc-v-fix,.sc-v-revise{color:var(--sc-accent);border-color:var(--sc-accent);background:var(--bgColor-accent-muted,#ddf4ff)}
@@ -615,6 +620,7 @@ function secondChairBootstrap() {
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'sc-toggle';
+      toggle.setAttribute('aria-label', 'Second Chair');
       toggle.dataset.scAct = 'panel';
       document.body.appendChild(toggle);
       const panel = document.createElement('div');
@@ -648,11 +654,11 @@ function secondChairBootstrap() {
     const scrollTop = listEl ? listEl.scrollTop : 0;
     const info = doneInfo(state);
     const pr = state ? progress(state) : null;
-    toggle.innerHTML = `<span class="sc-mark">SC</span> ${info ? '✓ done' : pr ? `${pr.done}/${pr.total}` : ''}`;
+    toggle.innerHTML = `${SC_LOGO} ${info ? '✓ done' : pr ? `${pr.done}/${pr.total}` : ''}`;
     toggle.classList.toggle('sc-complete', Boolean(pr && pr.complete && !info));
     const pct = (n) => (pr && pr.total ? (100 * n) / pr.total : 0);
     const head = `<div class="sc-panel-head">
-  <div class="sc-hrow"><span class="sc-mark">SC</span><b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${modeOf(state.payload)} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
+  <div class="sc-hrow">${SC_LOGO}<b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${modeOf(state.payload)} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
     ${info ? '<span class="sc-label sc-done-label">✓ Done</span>' : ''}
     <span class="sc-dot ${serverUp ? 'sc-up' : serverUp === false ? 'sc-down' : ''}" title="server ${serverUp ? 'on' : 'off'} · ${SC_SERVER}"></span>
     <button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
@@ -682,7 +688,7 @@ function secondChairBootstrap() {
   function updateProgress(id) {
     const pr = progress(state);
     const toggle = shellToggle();
-    if (toggle && !done()) toggle.innerHTML = `<span class="sc-mark">SC</span> ${pr.done}/${pr.total}`;
+    if (toggle && !done()) toggle.innerHTML = `${SC_LOGO} ${pr.done}/${pr.total}`;
     toggle?.classList.toggle('sc-complete', pr.complete && !done());
     const send = shellPanel()?.querySelector('[data-sc-act=export]');
     if (send) {

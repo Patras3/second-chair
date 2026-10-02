@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
-const { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
-  new Function(`${source}\nreturn { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
+const { SC_LOGO, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
+  new Function(`${source}\nreturn { SC_LOGO, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
 
 const payload = (over = {}) => ({
   tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc123',
@@ -77,6 +77,8 @@ test('round 2 starts clean even over round 1 decisions', () => {
 test('the card reads as the next comment: header, For you note, reply box, decision group, note', () => {
   const s = stateFor(payload(), null);
   const html = buildCard(s, s.payload.items[0], 'inline');
+  assert.match(html, /class="sc-card-head"><svg [^>]*class="sc-logo" aria-hidden="true"/);
+  assert.ok(!html.includes('sc-mark'), 'the old SC badge is gone');
   assert.match(html, /class="sc-card-head"[\s\S]*Second Chair[\s\S]*proposes[\s\S]*sc-label sc-v-fix">Fix/);
   assert.match(html, /class="sc-foryou"[\s\S]*For you[\s\S]*never posted[\s\S]*<code>foo\(\)<\/code>/);
   assert.ok(html.includes('change &lt;x&gt;'), 'reviewer text is escaped');
@@ -381,4 +383,14 @@ test('moving and counting follow the panel order, not the payload order', () => 
   const items = [{ thread_id: 'A', path: 'x' }, { thread_id: 'B', path: 'y' }, { thread_id: 'C', path: 'x' }, { thread_id: 'G' }];
   assert.deepEqual(displayOrder(items).map((i) => i.thread_id), ['G', 'A', 'C', 'B']);
   assert.equal(step(displayOrder(items), 'A', 1), 'C');
+});
+
+test('the mark is one inline SVG in the text colour, with no old SC badge', () => {
+  assert.match(SC_LOGO, /^<svg [^>]*viewBox="0 0 16 16"[^>]*stroke="currentColor"[^>]*class="sc-logo" aria-hidden="true">/);
+  assert.ok(!source.includes('sc-mark'));
+  assert.ok(source.includes('toggle.setAttribute(\'aria-label\', \'Second Chair\')'), 'the pill button has an accessible name');
+  assert.equal(source.split('${SC_LOGO}').length - 1, 3, 'pill (twice) and panel header use the constant');
+  const s = stateFor(payload(), null);
+  s.decisions.T1.decision = 'fix'; s.payload.items[0].auto = true;
+  assert.ok(buildCard(s, s.payload.items[0], 'inline', { expanded: false }).includes(SC_LOGO), 'the compact line carries the mark');
 });

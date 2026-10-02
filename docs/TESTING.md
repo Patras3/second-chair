@@ -56,8 +56,8 @@ Walk through this list by hand before a release, on your own test repository. Re
 - [ ] In a Claude Code session with no Second Chair installed, run `/plugin marketplace add Patras3/second-chair` and `/plugin install second-chair@second-chair`.
 - [ ] Start a new session. `second-chair doctor` shows the server as ok.
 - [ ] `/second-chair:setup` shows the doctor table and the browser steps that are still missing.
-- [ ] Chrome: install Tampermonkey, turn on **Allow user scripts** (or developer mode), and install the userscript from `http://127.0.0.1:7788/second-chair.user.js`. The **SC** pill shows on a pull request.
-- [ ] Firefox: install a script manager and the userscript. The **SC** pill shows on a pull request.
+- [ ] Chrome: install Tampermonkey, turn on **Allow user scripts** (or developer mode), and install the userscript from `http://127.0.0.1:7788/second-chair.user.js`. The Second Chair pill (the chair icon) shows on a pull request.
+- [ ] Firefox: install a script manager and the userscript. The Second Chair pill (the chair icon) shows on a pull request.
 
 ### Respond flow
 
@@ -82,7 +82,7 @@ Use a pull request by another account.
 
 ### Cards after the end
 
-- [ ] After the final send, no card stays on the page and the pill reads **SC ✓ done**.
+- [ ] After the final send, no card stays on the page and the pill reads **✓ done**.
 - [ ] After a reload, the cards stay hidden.
 - [ ] Stop the server (`second-chair stop`) and reload. The cards stay hidden.
 - [ ] **Show cards on the page** brings them back, read only.
@@ -98,3 +98,7 @@ Use a pull request by another account.
 - [ ] macOS: the server that the session hook started with `second-chair start` keeps running after the session ends.
 - [ ] Windows: the same check.
 - [ ] Windows: `bin/second-chair` starts with a shebang line, so outside Git Bash it runs only as `node bin/second-chair`. Note here how the hook and the command behave in PowerShell and in Git Bash.
+
+### GitHub settings
+
+- [ ] Set the repository's social preview to `docs/images/social-preview.png` (Settings → General → Social preview; GitHub has no API for it).

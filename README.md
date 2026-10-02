@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+  <img src="docs/images/logo.svg" alt="Second Chair" width="64">
+</picture>
+
 # Second Chair
 
 **AI prepares. You decide.**
@@ -39,7 +44,7 @@ Then:
 2. Start a new Claude Code session. Its start hook runs the local server. Run `/second-chair:setup` in that session. It checks Node, `gh` and the server, and walks you through the browser steps.
 3. Open <http://127.0.0.1:7788/second-chair.user.js> in your browser. The script manager offers to install the script. Updates come from the same address.
 
-Open any pull request on github.com. A small **SC** pill at the bottom right means it works.
+Open any pull request on github.com. A small pill with the Second Chair chair icon at the bottom right means it works.
 
 ### Where the command runs
 
@@ -129,7 +134,7 @@ A pull request's work in Second Chair is done when one of these happens:
 - The agent runs `second-chair close`.
 - You pick **Mark as done** in the panel's **⋯** menu.
 
-The cards then leave the page, and the pill reads **SC ✓ done**. The panel shows a purple **Done** banner and a read-only list of every decision and commit. **Show cards on the page** brings the cards back, read only, until the next reload. A new proposal from the agent starts over.
+The cards then leave the page, and the pill reads **✓ done**. The panel shows a purple **Done** banner and a read-only list of every decision and commit. **Show cards on the page** brings the cards back, read only, until the next reload. A new proposal from the agent starts over.
 
 <img src="docs/images/done.png" width="420" alt="The side panel after the final round: a Done banner and a read-only list of decisions with their commits">
 
@@ -266,7 +271,7 @@ A container that shares the host network (for example `docker run --network host
 
 ## Troubleshooting
 
-**No SC pill on GitHub.**
+**No Second Chair pill on GitHub.**
 
 - The pill shows only on pull request pages, such as `github.com/octo-org/example/pull/42`.
 - Check that the script manager is on, and that Second Chair is enabled in its dashboard.

@@ -1,6 +1,6 @@
 // Renders the README screenshots: the userscript on a mock GitHub pull request page, with a real
 // second-chair server behind it. Run: PLAYWRIGHT=/path/to/node_modules/playwright npm run screenshots
-// Writes docs/images/{card-light,card-dark,panel,review-mode,done}.png.
+// Writes docs/images/{card-light,card-dark,panel,review-mode,done,social-preview}.png.
 const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
 const fs = require('fs');
 const os = require('os');
@@ -326,6 +326,24 @@ const hidePill = (page) => page.addStyleTag({ content: '.sc-toggle{visibility:hi
     await p.waitForSelector('.sc-banner-done');
     await shoot(p.locator('.sc-panel'), 'done.png');
     await p.context().close();
+  }
+
+  // 6. The social preview: the mark, the name and the tagline on a 1280 x 640 page.
+  {
+    const mark = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="200" height="200" fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.75 1.75 5.25 9.25M3.75 9.25h8.5M5.25 9.25l-1 5M11 9.25l1 5"/></svg>';
+    const html = `<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;width:1280px;height:640px;background:#f6f8fa;color:#1f2328;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px}
+h1{margin:0;font-size:92px;font-weight:600;line-height:1}
+p{margin:0;font-size:40px;color:#59636e}
+</style>${mark}<h1>Second Chair</h1><p>AI prepares. You decide.</p>`;
+    const context = await browser.newContext({ viewport: { width: 1280, height: 640 }, deviceScaleFactor: 1 });
+    const p = await context.newPage();
+    await p.setContent(html);
+    const file = path.join(OUT, 'social-preview.png');
+    await p.screenshot({ path: file });
+    shots.push(file);
+    await context.close();
   }
 
   await browser.close();

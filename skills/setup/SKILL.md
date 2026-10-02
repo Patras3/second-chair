@@ -15,4 +15,4 @@ description: Use when the user installs Second Chair, when its cards do not show
    - Install Tampermonkey or Violentmonkey.
    - Chrome or Edge: open the extension's details page and turn on "Allow user scripts". On older versions turn on developer mode in `chrome://extensions` instead.
    - Open the userscript URL that doctor printed and confirm the install.
-4. Ask the user to open any pull request on GitHub. A small "SC" pill at the bottom right means it works.
+4. Ask the user to open any pull request on GitHub. A small pill with a chair icon at the bottom right means it works.
