@@ -8,7 +8,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
-import { health, isOlder, probe, stop } from '../lib/daemon.mjs';
+import { health, isOlder, probe, start, stop } from '../lib/daemon.mjs';
 import { buildPayload } from '../lib/payload.mjs';
 import { draftArgs } from '../lib/cli.mjs';
 import { startServer } from '../lib/server.mjs';
@@ -343,6 +343,35 @@ test('start restarts a server of another version that start launched', async () 
   } finally {
     old.child.kill();
     await run(process.execPath, [BIN, 'stop'], { env }).catch(() => {});
+    await cleanup(root);
+  }
+});
+
+test('start waits for a port that the stopped server frees late, as on Windows', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const old = await otherServer({ port, root, pidFile: join(root, 'server.pid') });
+  let calls = 0;
+  const taken = async () => ++calls <= 2;
+  try {
+    const r = await start({ port, root, bin: BIN, taken });
+    assert.deepEqual(r.restarted, { was: '0.9.0', now: VERSION });
+    assert.equal(calls, 3, 'the port was checked until it was free');
+  } finally {
+    old.child.kill();
+    await run(process.execPath, [BIN, 'stop'], { env: { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) } }).catch(() => {});
+    await cleanup(root);
+  }
+});
+
+test('start says another program holds the port when a restart never frees it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const old = await otherServer({ port, root, pidFile: join(root, 'server.pid') });
+  try {
+    await assert.rejects(start({ port, root, bin: BIN, taken: async () => true, portWait: 300 }), /in use by another program/);
+  } finally {
+    old.child.kill();
     await cleanup(root);
   }
 });
