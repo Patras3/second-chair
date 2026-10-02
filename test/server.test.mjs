@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, request } from 'node:http';
@@ -8,11 +8,14 @@ import { createHandler, createStore } from '../lib/server.mjs';
 
 let server;
 let base;
+let outer;
 let root;
 let port;
 
 before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'sc-'));
+  // The data directory sits one level down, so a test can see a write that escapes it.
+  outer = await mkdtemp(join(tmpdir(), 'sc-'));
+  root = join(outer, 'data');
   // Bind first to learn the port, then build the handler that checks Host against it.
   server = createServer();
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -23,7 +26,7 @@ before(async () => {
 });
 after(async () => {
   server.close();
-  await rm(root, { recursive: true, force: true });
+  await rm(outer, { recursive: true, force: true });
 });
 
 const H = { 'Content-Type': 'application/json', 'X-Second-Chair': '1' };
@@ -142,4 +145,26 @@ test('published records append per thread and survive a re-read', async () => {
   assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 30, round: 2, thread_id: 'T9', action: 'replied' })).status, 409);
   assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 30, round: '2', thread_id: 'T1', action: 'replied' })).status, 409);
   assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 30, round: 2, thread_id: 'T1' })).status, 409);
+});
+
+test('a repo or round that could leave the data directory is refused', async () => {
+  for (const repo of ['../..', '../x', 'x/..', './x', 'x/.', '/x', 'x/']) {
+    const r = await call('PUT', '/api/proposals', proposals({ repo }));
+    assert.equal(r.status, 400, repo);
+  }
+  assert.equal((await call('PUT', '/api/proposals', proposals({ round: '1' }))).status, 400, 'a round that is a string');
+  assert.equal((await call('GET', '/api/proposals?repo=../..&pr=7')).status, 400);
+  assert.equal((await call('POST', '/api/close', { repo: '../x', pr: 7 })).status, 400);
+  assert.equal((await call('POST', '/api/published', { repo: 'x/..', pr: 7, round: 1, thread_id: 'T1', action: 'replied' })).status, 409);
+  await call('PUT', '/api/proposals', proposals({ pr: 40 }));
+  for (const round of ['../../../../x', '1', 1.5, 0, null]) {
+    const r = await call('POST', '/api/decisions', decisions({ pr: 40, round }));
+    assert.equal(r.status, 409, String(round));
+  }
+  assert.equal((await call('GET', '/api/decisions?repo=acme/w&pr=40&round=1.5')).status, 400);
+  assert.equal((await call('GET', '/api/published?repo=acme/w&pr=40&round=1.5')).status, 400);
+  assert.deepEqual(await readdir(outer), ['data']);
+  assert.deepEqual(await readdir(root), ['acme']);
+  // Dots inside a name are fine.
+  assert.equal((await call('PUT', '/api/proposals', proposals({ repo: 'octo.org/ex.ample', pr: 41 }))).status, 200);
 });
