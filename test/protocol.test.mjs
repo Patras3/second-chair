@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ROUND_KEYS, NEEDS_NOTE, FINAL_ROUND, POSTS, TOOL, proposalsError, defaultRoot } from '../lib/protocol.mjs';
 
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
@@ -28,7 +29,7 @@ test('the data directory follows SECOND_CHAIR_HOME, then XDG_DATA_HOME', () => {
     assert.equal(defaultRoot(), '/x/sc');
     delete process.env.SECOND_CHAIR_HOME;
     process.env.XDG_DATA_HOME = '/x/data';
-    assert.equal(defaultRoot(), '/x/data/second-chair');
+    assert.equal(defaultRoot(), join('/x/data', 'second-chair'));
   } finally {
     process.env = keep;
   }
