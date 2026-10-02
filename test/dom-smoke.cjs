@@ -86,12 +86,12 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await page.waitForSelector(card('T1'));
   check((await page.locator('.sc-card[data-sc-where=inline]').count()) === 4, 'cards for the four loaded threads; none for the general item or the unloaded one');
   check((await page.textContent('.sc-toggle')).includes('3/6'), 'the three auto items count as decided');
-  check(await page.locator(`${card('T1')} .sc-reply-view li`).count() === 2, 'the reply renders as markdown');
-  check(await page.locator(`${card('T1')} .sc-context strong`).count() === 1, 'the context renders as markdown');
+  check(await page.locator(`${card('T1')} .sc-md li`).count() === 2, 'the reply renders as markdown');
+  check(await page.locator(`${card('T1')} .sc-foryou strong`).count() === 1, 'the context renders as markdown');
   check(await page.locator(`${card('T3')}.sc-compact`).count() === 1, 'an auto card is compact');
   check((await page.textContent(card('T2'))).includes('S2 legacy field'), 'the older summary_pl field still shows');
 
-  await page.click(`${card('T1')} [data-sc-act=edit]`);
+  await page.click(`${card('T1')} [data-sc-act=tab][data-sc-val=write]`);
   const noScroll = await page.evaluate((s) => { const t = document.querySelector(`${s} textarea`); return t && t.scrollHeight <= t.clientHeight + 4; }, card('T1'));
   check(noScroll, 'the reply editor is tall enough to need no scrolling');
   await page.fill(`${card('T1')} textarea`, 'Edited reply.');
@@ -123,7 +123,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await page.keyboard.press('j');
   await page.waitForTimeout(1200);
   check(await page.evaluate(() => document.querySelector('details').open) && await inView(page, card('T4')), 'moving to a folded thread unfolds it');
-  await page.click('[data-sc-act=next]');
+  await page.click('.sc-nav [data-sc-act=next]');
   await page.waitForSelector(card('T5'), { timeout: 6000 }).catch(() => {});
   await page.waitForTimeout(900);
   check(await inView(page, card('T5')), 'moving to an unloaded thread clicks Load more and scrolls to it');

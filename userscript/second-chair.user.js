@@ -298,60 +298,60 @@ function buildCard(state, item, where, view = {}) {
   const p = state.payload;
   const d = state.decisions[item.thread_id];
   const e = effective(state, item);
-  const links = threadLinks(p.repo, p.pr, item.comment_id);
-  const compact = !view.expanded && (e.auto || view.sent || view.done);
-  const verdict = item.verdict ? `<span class="sc-verdict sc-v-${esc(item.verdict)}">Proposed: ${esc(SC_VERDICT_LABEL[item.verdict] ?? item.verdict)}</span>` : '';
-  const badges = [
-    e.auto ? '<span class="sc-badge sc-auto">auto</span>' : '',
-    view.hidden ? '<span class="sc-badge sc-hidden" title="GitHub has not loaded this thread on the page">hidden</span>' : '',
-    e.decision ? `<span class="sc-done">✓ ${esc(decisionLabel(p, e.decision))}</span>` : '',
-  ].join(' ');
-  const head = [
-    `<span class="sc-author">${esc(item.author ?? 'general')}</span>`,
-    item.path ? `<code class="sc-path" title="${esc(item.path)}">${esc(shortPath(item.path, item.line))}</code>` : '',
-    verdict,
-    badges,
-  ].join(' ');
-  const jump = where === 'panel' && links
-    ? `<a href="#" data-sc-act="jump" data-sc-id="${esc(item.thread_id)}">jump</a> · <a href="${esc(links.files)}">in files</a>`
-    : '';
-  const expander = `<a href="#" data-sc-act="expand" data-sc-id="${esc(item.thread_id)}">${compact ? 'expand' : 'collapse'}</a>`;
-  const showExpander = e.auto || view.sent || view.done;
-  const cls = `sc-card${e.decision ? ' sc-decided' : ''}${compact ? ' sc-compact' : ''}`;
-  const open = `<div class="${cls}" data-sc-card="${esc(item.thread_id)}" data-sc-where="${where}">
-  <div class="sc-head">${head}<span class="sc-links">${jump}${jump && showExpander ? ' · ' : ''}${showExpander ? expander : ''}</span></div>`;
-  if (compact) {
-    const firstLine = String(d.reply || field(item, 'summary')).split('\n').find((l) => l.trim()) ?? '';
-    return `${open}<div class="sc-oneline">${richText(firstLine)}</div></div>`;
-  }
-  const summary = field(item, 'summary');
-  const context = field(item, 'context');
-  const fix = field(item, 'fix');
-  const commits = Array.isArray(item.commits) && item.commits.length ? `<div class="sc-row"><b>Commits:</b> ${item.commits.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : '';
+  const id = esc(item.thread_id);
   const review = modeOf(p) === 'review';
+  const compact = !view.expanded && (e.auto || view.sent || view.done);
+  const verdictLabel = item.verdict ? `<span class="sc-label sc-v-${esc(item.verdict)}">${esc(decisionLabel(p, item.verdict))}</span>` : '';
+  const who = item.origin === 'user' ? '<b>Your draft comment</b>' : `<b>Second Chair</b> <span class="sc-muted">${review ? 'draft comment' : 'proposes'}</span>`;
+  const links = threadLinks(p.repo, p.pr, item.comment_id);
+  const jump = where === 'panel' && links
+    ? `<a href="#" data-sc-act="jump" data-sc-id="${id}">jump</a><a href="${esc(links.files)}">in files</a>`
+    : '';
+  const pos = view.position ? `<span class="sc-muted">${esc(view.position)}</span>` : '';
+  const moves = view.position && !view.readOnly
+    ? `<a href="#" data-sc-act="prev" data-sc-id="${id}">‹</a><a href="#" data-sc-act="next" data-sc-id="${id}">›</a>`
+    : '';
+  const hidden = view.hidden ? '<span class="sc-label" title="GitHub has not loaded this thread on the page">hidden</span>' : '';
+  const cls = `sc-card${e.decision ? ' sc-decided' : ''}${compact ? ' sc-compact' : ''}`;
+  const open = `<div class="${cls}" data-sc-card="${id}" data-sc-where="${where}">`;
+  const mark = '<span class="sc-mark" aria-hidden="true">SC</span>';
+  if (compact) {
+    const first = String(d.reply || field(item, 'summary')).split('\n').find((l) => l.trim()) ?? '';
+    const label = e.decision ? `<span class="sc-label sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(p, e.decision))}</span>` : '';
+    return `${open}<div class="sc-oneline">${mark}${label}<span class="sc-oneline-text">${richText(first)}</span><a href="#" data-sc-act="expand" data-sc-id="${id}">expand</a></div></div>`;
+  }
+  const context = [field(item, 'context'), field(item, 'fix') ? `**Plan:** ${field(item, 'fix')}` : ''].filter(Boolean).join('\n\n');
+  const summary = field(item, 'summary');
+  const commits = Array.isArray(item.commits) && item.commits.length ? `<div class="sc-commits">Commits: ${item.commits.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : '';
   const needNote = missingNote(state, item);
-  const buttons = decisionsFor(p).map((b) => {
+  const reply = view.editing && !view.readOnly
+    ? `<textarea class="sc-reply" data-sc-field="reply" data-sc-id="${id}" rows="${rowsFor(d.reply, where === 'panel' ? 70 : 110)}">${esc(d.reply)}</textarea>`
+    : `<div class="sc-md markdown-body">${renderMarkdown(d.reply) || '<span class="sc-empty">Nothing to post.</span>'}</div>`;
+  const tabs = view.readOnly ? '' : `<div class="sc-tabs"><a href="#" class="sc-tab${view.editing ? ' sc-tab-on' : ''}" data-sc-tab="write" data-sc-act="tab" data-sc-val="write" data-sc-id="${id}">Write</a><a href="#" class="sc-tab${view.editing ? '' : ' sc-tab-on'}" data-sc-tab="preview" data-sc-act="tab" data-sc-val="preview" data-sc-id="${id}">Preview</a></div>`;
+  const original = item.origin === 'user' && item.original_en && item.original_en !== d.reply
+    ? `<details class="sc-original"><summary>Your original</summary><div class="sc-md markdown-body">${renderMarkdown(item.original_en)}</div></details>` : '';
+  const buttons = decisionsFor(p).map((b, i) => {
     const bc = ['sc-btn'];
     if (d.decision === b.key) bc.push('sc-on');
     else if (e.auto && e.decision === b.key) bc.push('sc-on-auto');
     else if (!e.decision && item.verdict === b.key) bc.push('sc-suggested');
-    return `<button type="button" class="${bc.join(' ')}" data-sc-act="decide" data-sc-id="${esc(item.thread_id)}" data-sc-val="${b.key}">${esc(b.label)}</button>`;
+    return `<button type="button" class="${bc.join(' ')}" data-sc-act="decide" data-sc-id="${id}" data-sc-val="${b.key}" title="${i + 1}">${d.decision === b.key ? '✓ ' : ''}${esc(b.label)}</button>`;
   }).join('');
-  const readOnly = Boolean(view.readOnly);
-  const replyBody = view.editing && !readOnly
-    ? `<textarea class="sc-reply" data-sc-field="reply" data-sc-id="${esc(item.thread_id)}" rows="${rowsFor(d.reply, where === 'panel' ? 70 : 110)}">${esc(d.reply)}</textarea>`
-    : `<div class="sc-md sc-reply-view">${renderMarkdown(d.reply) || '<span class="sc-empty">Nothing to post.</span>'}</div>`;
+  const footer = view.readOnly
+    ? `<div class="sc-card-foot"><span class="sc-muted">Decision:</span> <b>${esc(e.decision ? decisionLabel(p, e.decision) : 'none')}</b></div>`
+    : `<div class="sc-card-foot"><div class="sc-seg">${buttons}</div><input class="sc-note${needNote ? ' sc-note-needed' : ''}" data-sc-field="note" data-sc-id="${id}" placeholder="${needNote ? 'What should change? Revise needs a note' : 'Note for the agent (optional)'}" value="${esc(d.note)}"></div>`;
+  const expander = e.auto || view.sent || view.done ? `<a href="#" data-sc-act="expand" data-sc-id="${id}">collapse</a>` : '';
   return `${open}
-  ${summary ? `<div class="sc-summary sc-md">${renderMarkdown(summary)}</div>` : ''}
-  ${context ? `<div class="sc-context"><div class="sc-label">Context — for you</div><div class="sc-md">${renderMarkdown(context)}</div></div>` : ''}
-  ${fix ? `<div class="sc-row"><b>How to fix:</b> <span class="sc-md sc-inline-md">${renderMarkdown(fix)}</span></div>` : ''}
-  ${commits}
-  <div class="sc-label">${review ? (item.comment_id ? 'Comment to post' : 'Review body') : 'Reply to post'}${d.replyEdited ? ' <span class="sc-edited">(edited)</span>' : ''} ${readOnly ? '' : ` <a href="#" class="sc-edit" data-sc-act="edit" data-sc-id="${esc(item.thread_id)}">${view.editing ? 'preview' : 'edit'}</a>`}</div>
-  ${replyBody}
-  ${readOnly
-    ? `<div class="sc-row"><b>Decision:</b> ${esc(decisionLabel(p, e.decision ?? ''))}</div>`
-    : `<div class="sc-buttons">${buttons}</div>
-  <input class="sc-note${needNote ? ' sc-note-needed' : ''}" data-sc-field="note" data-sc-id="${esc(item.thread_id)}" placeholder="${needNote ? 'What should change? Revise needs a note' : 'Note for the agent (optional)'}" value="${esc(d.note)}">`}
+  <div class="sc-card-head">${mark}${who}${verdictLabel}${hidden}<span class="sc-head-right">${pos}${moves}${jump}${expander}</span></div>
+  <div class="sc-card-body">
+    ${summary ? `<div class="sc-summary">${renderMarkdown(summary)}</div>` : ''}
+    ${context ? `<div class="sc-foryou"><div class="sc-foryou-title">For you <span class="sc-muted">· never posted</span></div><div class="sc-md markdown-body">${renderMarkdown(context)}</div></div>` : ''}
+    ${commits}
+    <div class="sc-caption">${review ? (item.comment_id ? 'Comment to post' : 'Review body') : 'Reply to post'}${d.replyEdited ? ' <span class="sc-edited">· edited</span>' : ''}</div>
+    <div class="sc-reply-box">${tabs}${reply}</div>
+    ${original}
+  </div>
+  ${footer}
 </div>`;
 }
 
@@ -396,7 +396,7 @@ html.sc-shift-wide body{margin-right:50vw!important}
 .sc-server{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor}
 .sc-server.sc-up{color:var(--fgColor-success,#1a7f37)}
 .sc-server.sc-down{color:var(--fgColor-muted,#59636e)}
-.sc-bar button,.sc-btn,.sc-chip{padding:3px 10px;border-radius:6px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-muted,#f6f8fa);color:inherit;font:inherit;cursor:pointer}
+.sc-bar button,.sc-chip{padding:3px 10px;border-radius:6px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-muted,#f6f8fa);color:inherit;font:inherit;cursor:pointer}
 .sc-bar button:disabled{opacity:.45;cursor:not-allowed}
 .sc-chip{border-radius:12px;font-size:12px;padding:1px 9px}
 .sc-chip b{font-weight:600;margin-left:2px}
@@ -417,34 +417,51 @@ html.sc-shift-wide body{margin-right:50vw!important}
 .sc-decided .sc-dot{background:var(--fgColor-success,#1a7f37)}
 .sc-is-auto .sc-dot{background:var(--fgColor-muted,#8c959f)}
 .sc-item.sc-open{border-color:var(--fgColor-accent,#0969da);box-shadow:0 0 0 1px var(--fgColor-accent,#0969da)}
-.sc-card{padding:10px 12px;border-top:1px dashed var(--borderColor-default,#d0d7de);font:13px/1.6 -apple-system,system-ui,sans-serif;color:var(--fgColor-default,#1f2328)}
-.sc-card[data-sc-where=inline]{margin:8px 0;border:2px solid var(--fgColor-accent,#0969da);border-radius:6px;background:var(--bgColor-default,#fff)}
-.sc-card[data-sc-where=inline].sc-decided{border-color:var(--fgColor-success,#1a7f37)}
-.sc-card[data-sc-where=inline].sc-compact{border-width:1px;border-style:dashed;padding:6px 10px}
-.sc-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
-.sc-compact .sc-head{margin-bottom:2px}
-.sc-oneline{color:var(--fgColor-muted,#59636e);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sc-links{margin-left:auto;font-size:12px}
+.sc-card{--sc-accent:var(--fgColor-accent,#0969da);--sc-border:var(--borderColor-default,#d0d7de);--sc-subtle:var(--bgColor-muted,#f6f8fa);--sc-canvas:var(--bgColor-default,#fff);--sc-muted:var(--fgColor-muted,#59636e);--sc-success:var(--fgColor-success,#1a7f37);
+  border:1px solid var(--sc-border);border-left:3px solid var(--sc-accent);border-radius:6px;background:var(--sc-canvas);color:var(--fgColor-default,#1f2328);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;overflow:hidden}
+.sc-card[data-sc-where=inline]{margin:8px 16px 16px}
+.sc-card[data-sc-where=panel]{margin:0 0 8px}
+.sc-card.sc-decided{border-left-color:var(--sc-success)}
+.sc-card-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;background:var(--sc-subtle);border-bottom:1px solid var(--sc-border);font-size:13px}
+.sc-head-right{margin-left:auto;display:flex;gap:10px;font-size:12px}
+.sc-head-right a{text-decoration:none}
+.sc-mark{width:20px;height:20px;border-radius:50%;flex:none;display:inline-grid;place-items:center;background:var(--fgColor-default,#1f2328);color:var(--sc-canvas);font:700 9px/1 system-ui}
+.sc-muted{color:var(--sc-muted)}
+.sc-label{display:inline-block;font:500 12px/18px -apple-system,system-ui,sans-serif;padding:0 7px;border-radius:2em;border:1px solid var(--sc-border);color:var(--sc-muted)}
+.sc-v-fix,.sc-v-revise{color:var(--sc-accent);border-color:var(--sc-accent);background:var(--bgColor-accent-muted,#ddf4ff)}
+.sc-v-reply,.sc-v-publish,.sc-v-post{color:var(--sc-success);border-color:var(--sc-success)}
+.sc-v-pushback,.sc-v-hold,.sc-v-drop{color:var(--fgColor-severe,#bc4c00);border-color:var(--fgColor-severe,#bc4c00)}
+.sc-v-manual{color:var(--fgColor-danger,#d1242f);border-color:var(--fgColor-danger,#d1242f)}
+.sc-card-body{padding:12px}
+.sc-summary{font-weight:600;margin-bottom:8px}
+.sc-foryou{background:var(--bgColor-attention-muted,#fff8c5);border:1px solid var(--borderColor-attention-muted,#d4a72c66);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px}
+.sc-foryou-title{font-weight:600;margin-bottom:2px}
+.sc-caption{font-size:12px;font-weight:600;color:var(--sc-muted);margin-bottom:6px}
+.sc-edited{font-weight:400;color:var(--fgColor-severe,#bc4c00)}
+.sc-reply-box{border:1px solid var(--sc-border);border-radius:6px;overflow:hidden}
+.sc-tabs{display:flex;background:var(--sc-subtle);border-bottom:1px solid var(--sc-border);padding:0 8px}
+.sc-tab{padding:7px 12px;font-size:13px;color:var(--sc-muted)!important;margin-bottom:-1px;text-decoration:none!important}
+.sc-tab-on{background:var(--sc-canvas);border:1px solid var(--sc-border);border-bottom-color:var(--sc-canvas);border-radius:6px 6px 0 0;color:var(--fgColor-default,#1f2328)!important}
+.sc-reply-box .sc-md{padding:10px 12px}
+.sc-reply{display:block;width:100%;box-sizing:border-box;border:0;padding:10px 12px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--sc-canvas);color:inherit;resize:vertical;overflow:hidden;outline:none}
+.sc-original{margin-top:8px;font-size:13px}.sc-original summary{cursor:pointer;color:var(--sc-muted)}
+.sc-commits{font-size:12px;margin-bottom:8px;color:var(--sc-muted)}
+.sc-card-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid var(--sc-border);background:var(--sc-subtle)}
+.sc-seg{display:inline-flex}
+.sc-btn{height:28px;padding:0 12px;border:1px solid var(--sc-border);background:var(--sc-subtle);color:inherit;font:500 12px -apple-system,system-ui,sans-serif;cursor:pointer;margin-left:-1px}
+.sc-seg .sc-btn:first-child{border-radius:6px 0 0 6px;margin-left:0}.sc-seg .sc-btn:last-child{border-radius:0 6px 6px 0}
+.sc-btn:hover{background:var(--bgColor-neutral-muted,#eaeef2)}
+.sc-btn.sc-suggested{border-style:dashed;border-color:var(--sc-accent);color:var(--sc-accent);position:relative;z-index:1}
+.sc-btn.sc-on{background:var(--sc-accent);border-color:var(--sc-accent);color:#fff;position:relative;z-index:1}
+.sc-btn.sc-on-auto{border-color:var(--sc-accent);color:var(--sc-accent);font-weight:600}
+.sc-note{flex:1;min-width:180px;height:28px;box-sizing:border-box;padding:0 10px;border:1px solid var(--sc-border);border-radius:6px;background:var(--sc-canvas);color:inherit;font:13px -apple-system,system-ui,sans-serif}
+.sc-note.sc-note-needed{border-color:var(--fgColor-danger,#d1242f)}
+.sc-oneline{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:13px}
+.sc-oneline-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--sc-muted)}
+.sc-badge{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor;color:var(--fgColor-attention,#9a6700)}
 .sc-author{font-weight:600}
 .sc-path{font-size:11px}
-.sc-verdict,.sc-badge{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor}
-.sc-badge.sc-auto{color:var(--fgColor-muted,#59636e)}
-.sc-badge.sc-hidden{color:var(--fgColor-attention,#9a6700)}
-.sc-v-fix{color:var(--fgColor-accent,#0969da)}
-.sc-v-pushback,.sc-v-hold{color:var(--fgColor-severe,#bc4c00)}
-.sc-v-manual{color:var(--fgColor-danger,#d1242f)}
-.sc-v-reply,.sc-v-publish,.sc-v-post{color:var(--fgColor-success,#1a7f37)}
-.sc-v-revise{color:var(--fgColor-accent,#0969da)}
-.sc-v-drop{color:var(--fgColor-severe,#bc4c00)}
-.sc-note.sc-note-needed{border-color:var(--fgColor-danger,#d1242f)}
-.sc-done{color:var(--fgColor-success,#1a7f37);font-weight:600;font-size:12px}
-.sc-summary{font-weight:600;margin-bottom:6px}
-.sc-context{background:var(--bgColor-attention-muted,#fff8c5);border-left:3px solid var(--fgColor-attention,#9a6700);padding:6px 10px;margin:6px 0;border-radius:4px}
-.sc-label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--fgColor-muted,#59636e);margin:8px 0 3px}
-.sc-label a{text-transform:none;letter-spacing:0;margin-left:6px}
-.sc-context .sc-label{margin-top:0}
-.sc-edited{text-transform:none;color:var(--fgColor-severe,#bc4c00)}
-.sc-row{margin:6px 0}
+.sc-empty{color:var(--sc-muted);font-style:italic}
 .sc-md>:first-child{margin-top:0}.sc-md>:last-child{margin-bottom:0}
 .sc-md p,.sc-md ul,.sc-md ol,.sc-md pre,.sc-md table,.sc-md blockquote{margin:0 0 8px}
 .sc-md ul,.sc-md ol{padding-left:22px}
@@ -453,15 +470,6 @@ html.sc-shift-wide body{margin-right:50vw!important}
 .sc-md th,.sc-md td{border:1px solid var(--borderColor-default,#d0d7de);padding:2px 8px}
 .sc-md pre{padding:8px;border-radius:6px;background:var(--bgColor-muted,#f6f8fa);overflow:auto}
 .sc-md blockquote{padding-left:10px;border-left:3px solid var(--borderColor-default,#d0d7de);color:var(--fgColor-muted,#59636e)}
-.sc-inline-md,.sc-inline-md>p{display:inline}
-.sc-reply-view{padding:8px 10px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff)}
-.sc-empty{color:var(--fgColor-muted,#59636e);font-style:italic}
-.sc-reply{width:100%;box-sizing:border-box;font:13px/1.5 ui-monospace,SFMono-Regular,monospace;padding:6px;border:1px solid var(--fgColor-accent,#0969da);border-radius:6px;background:var(--bgColor-default,#fff);color:inherit;resize:vertical;overflow:hidden}
-.sc-note{width:100%;box-sizing:border-box;margin-top:6px;padding:4px 6px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff);color:inherit;font:12px -apple-system,system-ui,sans-serif}
-.sc-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.sc-btn.sc-suggested{border-style:dashed;border-color:var(--fgColor-accent,#0969da)}
-.sc-btn.sc-on{background:var(--fgColor-accent,#0969da);border-color:var(--fgColor-accent,#0969da);color:#fff}
-.sc-btn.sc-on-auto{border-color:var(--fgColor-accent,#0969da);color:var(--fgColor-accent,#0969da);font-weight:600}
 .sc-card code,.sc-item code{font-size:11.5px;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
 .sc-md pre code{padding:0;background:none}
 .sc-flash{outline:3px solid var(--fgColor-accent,#0969da);outline-offset:2px;transition:outline-color 1.5s}
@@ -502,6 +510,7 @@ function secondChairBootstrap() {
     expanded: expanded.has(it.thread_id),
     editing: editing.has(it.thread_id),
     hidden: Boolean(it.comment_id) && !anchorFor(it),
+    position: `${state.payload.items.indexOf(it) + 1} of ${state.payload.items.length}`,
     sent: Boolean(state.sentAt),
     done: done(),
     readOnly: done(),
@@ -820,6 +829,7 @@ function secondChairBootstrap() {
       saveUi();
       renderPanel();
     } else if (act === 'prev' || act === 'next') {
+      if (el.dataset.scId) openId = el.dataset.scId;
       move(act === 'next' ? 1 : -1);
     } else if (act === 'markdone') {
       if (!confirm('Mark this pull request as done? Its cards leave the page.')) return;
@@ -867,15 +877,18 @@ function secondChairBootstrap() {
     } else if (act === 'expand') {
       toggleSet(expanded, id);
       refreshThread(id);
-    } else if (act === 'edit') {
-      toggleSet(editing, id);
+    } else if (act === 'tab') {
+      if (el.dataset.scVal === 'write') editing.add(id);
+      else editing.delete(id);
       expanded.add(id);
       refreshThread(id);
-      const where = el.closest('.sc-card')?.dataset.scWhere;
-      const area = document.querySelector(`.sc-card[data-sc-where="${where}"][data-sc-card="${CSS.escape(id)}"] textarea.sc-reply`);
-      if (area) {
-        autosize(area);
-        area.focus();
+      if (el.dataset.scVal === 'write') {
+        const where = el.closest('.sc-card')?.dataset.scWhere;
+        const area = document.querySelector(`.sc-card[data-sc-where="${where}"][data-sc-card="${CSS.escape(id)}"] textarea.sc-reply`);
+        if (area) {
+          autosize(area);
+          area.focus();
+        }
       }
     } else if (act === 'decide') {
       const d = state.decisions[id];

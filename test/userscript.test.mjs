@@ -62,18 +62,55 @@ test('round 2 starts clean even over round 1 decisions', () => {
   assert.equal(r.decisions.T1.decision, null);
 });
 
-test('cards escape reviewer text and mark the suggested button', () => {
+test('the card reads as the next comment: header, For you note, reply box, decision group, note', () => {
   const s = stateFor(payload(), null);
   const html = buildCard(s, s.payload.items[0], 'inline');
-  assert.ok(html.includes('change &lt;x&gt;'));
-  assert.ok(html.includes('<code>foo()</code>'));
+  assert.match(html, /class="sc-card-head"[\s\S]*Second Chair[\s\S]*proposes[\s\S]*sc-label sc-v-fix">Fix/);
+  assert.match(html, /class="sc-foryou"[\s\S]*For you[\s\S]*never posted[\s\S]*<code>foo\(\)<\/code>/);
+  assert.ok(html.includes('change &lt;x&gt;'), 'reviewer text is escaped');
+  assert.match(html, /class="sc-reply-box"[\s\S]*data-sc-val="write"[\s\S]*data-sc-val="preview"/);
+  assert.match(html, /class="sc-md markdown-body/);
   assert.match(html, /sc-btn sc-suggested" [^>]*data-sc-val="fix"/);
-  assert.ok(html.includes('Context — for you'));
+  assert.match(html, /<input class="sc-note"/);
   s.decisions.T1.decision = 'reply';
-  const decided = buildCard(s, s.payload.items[0], 'panel');
+  const decided = buildCard(s, s.payload.items[0], 'inline');
+  assert.match(decided, /sc-card sc-decided/);
   assert.match(decided, /sc-btn sc-on" [^>]*data-sc-val="reply"/);
-  assert.ok(!decided.includes('sc-suggested'));
   assert.ok(buildPanelList(s, null, 'all', () => ({})).includes('Reply'));
+});
+
+test('Write shows a textarea tall enough for the text; Preview shows rendered markdown', () => {
+  const s = stateFor(payload(), null);
+  s.decisions.T1.reply = 'line one\n\n- a\n- b';
+  assert.ok(!buildCard(s, s.payload.items[0], 'inline', {}).includes('<textarea'));
+  assert.match(buildCard(s, s.payload.items[0], 'inline', { editing: true }), /<textarea class="sc-reply"[^>]* rows="5"/);
+  assert.equal(rowsFor('x'.repeat(250), 100), 4);
+});
+
+test('an auto card is one line until expanded', () => {
+  const s = stateFor(autoPayload(), null);
+  const a = s.payload.items[0];
+  assert.match(buildCard(s, a, 'inline', {}), /sc-compact[\s\S]*auto · Fix[\s\S]*Done in abc/);
+  assert.ok(!buildCard(s, a, 'inline', { expanded: true }).includes('sc-compact'));
+  assert.ok(!buildCard(s, s.payload.items[1], 'inline', {}).includes('sc-compact'));
+  assert.match(buildCard(s, s.payload.items[1], 'inline', { sent: true }), /sc-compact/);
+  assert.match(buildCard(s, s.payload.items[1], 'inline', { done: true }), /sc-compact/);
+  assert.match(buildCard(s, a, 'inline', { expanded: true }), /sc-btn sc-on-auto" [^>]*data-sc-val="fix"/);
+});
+
+test('a comment the user wrote says so, and shows the original under a proposed rewrite', () => {
+  const s = stateFor(review({ items: [{ thread_id: 'C', comment_id: 5, verdict: 'revise', origin: 'user', original_en: 'old words', reply_en: 'new words', path: 'a.md', line: 1 }] }), null);
+  const html = buildCard(s, s.payload.items[0], 'inline');
+  assert.ok(html.includes('Your draft comment'));
+  assert.match(html, /<details class="sc-original"><summary>Your original<\/summary>[\s\S]*old words/);
+  assert.ok(html.includes('Comment to post'));
+});
+
+test('the head shows the position with prev and next links, but not on a read-only card', () => {
+  const s = stateFor(payload(), null);
+  const html = buildCard(s, s.payload.items[0], 'inline', { position: '1 of 3' });
+  assert.match(html, /1 of 3[\s\S]*data-sc-act="prev" data-sc-id="T1"[\s\S]*data-sc-act="next" data-sc-id="T1"/);
+  assert.ok(!buildCard(s, s.payload.items[0], 'inline', { position: '1 of 3', readOnly: true }).includes('data-sc-act="prev"'));
 });
 
 test('links point at both the conversation and the files tab, and a global item has none', () => {
@@ -145,27 +182,6 @@ test('step wraps around and starts at an end when nothing is selected', () => {
   assert.equal(step([], 'x', 1), null);
 });
 
-test('auto and sent cards are compact until expanded; a finished triage too', () => {
-  const s = stateFor(autoPayload(), null);
-  const a = s.payload.items[0];
-  assert.match(buildCard(s, a, 'inline', {}), /sc-compact/);
-  assert.ok(!buildCard(s, a, 'inline', { expanded: true }).includes('sc-compact'));
-  assert.ok(!buildCard(s, s.payload.items[1], 'inline', {}).includes('sc-compact'));
-  assert.match(buildCard(s, s.payload.items[1], 'inline', { sent: true }), /sc-compact/);
-  assert.match(buildCard(s, s.payload.items[1], 'inline', { done: true }), /sc-compact/);
-  assert.match(buildCard(s, a, 'inline', { expanded: true }), /sc-btn sc-on-auto" [^>]*data-sc-val="fix"/);
-});
-
-test('the reply shows as a preview, and as a textarea tall enough for its text while editing', () => {
-  const s = stateFor(payload(), null);
-  s.decisions.T1.reply = 'line one\n\n- a\n- b';
-  const view = buildCard(s, s.payload.items[0], 'inline', {});
-  assert.ok(view.includes('sc-reply-view') && !view.includes('<textarea'));
-  const edit = buildCard(s, s.payload.items[0], 'inline', { editing: true });
-  assert.match(edit, /<textarea class="sc-reply"[^>]* rows="5"/);
-  assert.equal(rowsFor('x'.repeat(250), 100), 4);
-});
-
 test('markdown falls back to escaped text when marked is not loaded', () => {
   assert.equal(renderMarkdown('a `b` <c>'), '<p>a <code>b</code> &lt;c&gt;</p>');
   assert.equal(renderMarkdown('  '), '');
@@ -191,7 +207,7 @@ const review = (over = {}) => payload({
 test('review mode offers Post, Revise and Drop, and labels the text as a comment or the review body', () => {
   const s = stateFor(review(), null);
   const card = buildCard(s, s.payload.items[0], 'inline');
-  assert.deepEqual([...card.matchAll(/data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'revise', 'drop']);
+  assert.deepEqual([...card.matchAll(/data-sc-act="decide"[^>]*data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'revise', 'drop']);
   assert.ok(card.includes('Comment to post'));
   assert.ok(buildCard(s, s.payload.items[1], 'panel').includes('Review body'));
   assert.match(parsePayload(JSON.stringify(review({ mode: 'other' }))).error, /Unknown mode/);
@@ -215,7 +231,7 @@ test('Revise counts as decided only once its note says what to change', () => {
 
 test('review round 2 keeps only Post and Drop, and a reply-mode export says so', () => {
   const s = stateFor(review({ round: 2 }), null);
-  assert.deepEqual([...buildCard(s, s.payload.items[0], 'inline').matchAll(/data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'drop']);
+  assert.deepEqual([...buildCard(s, s.payload.items[0], 'inline').matchAll(/data-sc-act="decide"[^>]*data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'drop']);
   const r = stateFor(payload(), null);
   r.decisions.T1.decision = 'fix';
   r.decisions.G.decision = 'manual';
@@ -257,8 +273,11 @@ test('a read-only card has no buttons, no editor and no note', () => {
   const html = buildCard(s, s.payload.items[0], 'inline', { readOnly: true, expanded: true });
   assert.ok(!html.includes('data-sc-act="decide"'));
   assert.ok(!html.includes('data-sc-field="note"'));
-  assert.ok(!html.includes('data-sc-act="edit"'));
+  assert.ok(!html.includes('data-sc-act="tab"'));
   assert.ok(html.includes('Will do.'));
+  assert.match(html, /Decision:<\/span> <b>Fix<\/b>/);
+  s.decisions.T1.decision = null;
+  assert.match(buildCard(s, s.payload.items[0], 'inline', { readOnly: true }), /Decision:<\/span> <b>none<\/b>/);
 });
 
 test('a stored state whose final round was sent stays done without the server', () => {
