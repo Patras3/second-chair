@@ -163,3 +163,56 @@ test('stop signals nothing when the server on the port is not the one start laun
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('a file that cannot be read or parsed fails with its name and the reason', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(await freePort()) };
+  const bad = join(root, 'bad.json');
+  const missing = join(root, 'missing.json');
+  await writeFile(bad, '{ not json');
+  try {
+    for (const args of [
+      ['build', '--repo', 'o/n', '--pr', '1', '--round', '1', '--head', 'h', missing],
+      ['build', '--repo', 'o/n', '--pr', '1', '--round', '1', '--head', 'h', bad],
+      ['push', bad],
+      ['put-decisions', missing],
+      ['draft', '3', missing],
+      ['draft', '3', '--body-file', missing],
+    ]) {
+      const r = await run(process.execPath, [BIN, ...args], { env }).catch((e) => e);
+      assert.equal(r.code, 1, args.join(' '));
+      const file = args.includes(bad) ? bad : missing;
+      assert.ok(r.stderr.startsWith(`second-chair: cannot read ${file}: `), `${args.join(' ')}: ${r.stderr}`);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('put-decisions hands pasted decisions to the server, and shows why the server refuses', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  const server = await startServer({ port, root, log: () => {} });
+  const H = { 'Content-Type': 'application/json', 'X-Second-Chair': '1' };
+  try {
+    const proposals = { tool: 'second-chair', kind: 'proposals', repo: 'octo-org/example', pr: 5, round: 2, head: 'h2', items: [{ thread_id: 'T1', comment_id: 11, verdict: 'publish', reply_en: 'Done in `abc`.' }] };
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/proposals`, { method: 'PUT', headers: H, body: JSON.stringify(proposals) })).status, 200);
+    const decisions = { tool: 'second-chair', kind: 'decisions', mode: 'reply', repo: 'octo-org/example', pr: 5, round: 2, head: 'h2', exported_at: 'now', decisions: [{ thread_id: 'T1', comment_id: 11, proposed: 'publish', decision: 'publish', auto: false, reply_en: 'Done in `abc`.', reply_edited: false, note: '' }] };
+    const file = join(root, 'decisions.json');
+    await writeFile(file, JSON.stringify(decisions, null, 2));
+    const ok = await run(process.execPath, [BIN, 'put-decisions', file], { env });
+    assert.match(ok.stdout, /saved 1 decisions for octo-org\/example#5 round 2/);
+    const got = await run(process.execPath, [BIN, 'get', '--repo', 'octo-org/example', '--pr', '5', '--round', '2'], { env });
+    assert.equal(JSON.parse(got.stdout).decisions[0].reply_en, 'Done in `abc`.');
+
+    await writeFile(file, JSON.stringify({ ...decisions, head: 'old' }));
+    const refused = await run(process.execPath, [BIN, 'put-decisions', file], { env }).catch((e) => e);
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /the server refused these decisions: these decisions answer an older head; reload the proposals/);
+    assert.equal((await run(process.execPath, [BIN, 'put-decisions'], { env }).catch((e) => e)).code, 1, 'no file');
+  } finally {
+    server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
