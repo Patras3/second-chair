@@ -190,6 +190,21 @@ test('draft refuses a bad new comment before any gh call', async () => {
   assert.equal(calls.length, 0);
 });
 
+test('when a guard stops the fallback after some new comments were appended, it says which, not that nothing changed', async () => {
+  let n = 0;
+  const { gh, calls } = fakeGh(pendingScript([
+    { match: has('graphql'), reply: () => { if (n++ === 0) return { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_ok' } } } }; throw new Error('not supported'); } },
+  ]));
+  const three = [newComment, { path: 'src/c.js', line: 9, body: 'Second.' }, { path: 'src/c.js', line: 10, body: 'Third.' }];
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'def', comments: three, backupDir: tmpdir() }), (e) => {
+    assert.match(e.message, /made on commit/);
+    assert.match(e.message, /1 of the new comments was already added to pending review 901; leave it out when you run draft again/);
+    assert.doesNotMatch(e.message, /Nothing was changed/);
+    return true;
+  });
+  assert.ok(!calls.some((c) => c.args.includes('DELETE')));
+});
+
 test('the fallback refuses and deletes nothing when my review is on another commit', async () => {
   const { gh, calls } = fakeGh(pendingScript([refuseGraphql]));
   await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'def', comments: [newComment], backupDir: tmpdir() }), /moved|move your comments/);
@@ -252,7 +267,8 @@ test('draft stops when GitHub adds no thread, says which comment and what was ad
   const two = [newComment, { path: 'src/c.js', line: 999, body: 'Outside the diff.' }];
   await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: two, body: 'New summary.', backupDir: dir }), (e) => {
     assert.match(e.message, /comment 2 \(src\/c\.js:999\)/);
-    assert.match(e.message, /1 comment before it was added to pending review 901/);
+    assert.match(e.message, /1 of the new comments was already added to pending review 901; leave it out when you run draft again/);
+    assert.match(e.message, /The body was not set/);
     return true;
   });
   assert.ok(!calls.some((c) => c.args.includes('DELETE') || c.args.includes('PUT')));

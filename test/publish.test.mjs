@@ -228,7 +228,7 @@ test('respond mode posts nothing while I have a pending review on the pull reque
 test('a body for a pending review that has none goes with the submit, and is refused without one', async () => {
   const srv = fakeServer({ proposals: reviewRound2, decisions: reviewDecisions() });
   const g1 = reviewGh([], '');
-  await assert.rejects(publish({ gh: g1.gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /--submit.*Nothing was changed/);
+  await assert.rejects(publish({ gh: g1.gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /Ask the user whether to submit the review now.*Nothing was posted/);
   assert.equal(writes(g1.calls).length, 0);
 
   const g2 = reviewGh([{ match: has('reviews/901/events'), reply: {} }], '');

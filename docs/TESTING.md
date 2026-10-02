@@ -12,7 +12,7 @@ Run on 2026-10-02 with Claude Code 2.1.287, gh 2.95.0 and Node 22.23.1. The test
 
 | Check | Result |
 | --- | --- |
-| `claude plugin validate .` | Pass. One warning: the marketplace manifest has no description. |
+| `claude plugin validate .` | Pass. The first run warned that the marketplace manifest had no description. With one added, it passes with no warnings. |
 | `claude plugin validate .claude-plugin/plugin.json` | Pass, no warnings. |
 | `claude plugin marketplace add <repo>` and `claude plugin install second-chair@second-chair` | Pass. Installed at user scope. |
 | `second-chair` on the Bash tool's PATH in a fresh `claude -p` session | Pass. `command -v second-chair` found the plugin's `bin/second-chair`. |
