@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { health, probe } from '../lib/daemon.mjs';
 import { buildPayload } from '../lib/payload.mjs';
@@ -14,7 +15,7 @@ import { startServer } from '../lib/server.mjs';
 
 const run = promisify(execFile);
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-const BIN = new URL('../bin/second-chair', import.meta.url).pathname;
+const BIN = fileURLToPath(new URL('../bin/second-chair', import.meta.url));
 
 // On Windows a killed server can hold server.log open a moment longer, so the cleanup retries.
 const cleanup = (root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -52,7 +53,7 @@ test('start runs the server in the background once, and stop ends it', async () 
     assert.equal(await probe(port), false);
   } finally {
     await run(process.execPath, [BIN, 'stop'], { env }).catch(() => {});
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -71,7 +72,7 @@ test('start reports a port taken by something else instead of hanging', async ()
   } finally {
     blocker.close();
     await run(process.execPath, [BIN, 'stop'], { env }).catch(() => {});
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -84,7 +85,7 @@ test('doctor lists each check with ok or a fix', async () => {
     assert.match(r.stdout, /server .* not running.*second-chair start/);
     assert.match(r.stdout, /userscript .*http:\/\/127\.0\.0\.1:\d+\/second-chair\.user\.js/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -103,7 +104,7 @@ test('doctor tells a port held by another program from a stopped server', async 
     assert.doesNotMatch(r.stdout, /run: second-chair start/);
   } finally {
     blocker.close();
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -119,7 +120,7 @@ test('stop does not signal a stale pid file', async () => {
     assert.equal(await readFile(join(root, 'server.pid'), 'utf8').catch(() => 'gone'), 'gone');
   } finally {
     bystander.kill();
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -174,7 +175,7 @@ test('stop signals nothing when the server on the port is not the one start laun
   } finally {
     bystander.kill();
     other.close();
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -199,7 +200,7 @@ test('a file that cannot be read or parsed fails with its name and the reason', 
       assert.ok(r.stderr.startsWith(`second-chair: cannot read ${file}: `), `${args.join(' ')}: ${r.stderr}`);
     }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -227,7 +228,7 @@ test('put-decisions hands pasted decisions to the server, and shows why the serv
     assert.equal((await run(process.execPath, [BIN, 'put-decisions'], { env }).catch((e) => e)).code, 1, 'no file');
   } finally {
     server.close();
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 

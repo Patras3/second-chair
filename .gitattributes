@@ -1,0 +1,3 @@
+# Keep LF line endings on every checkout, Windows too, so the tests that compare text hold.
+* text=auto eol=lf
+*.png binary
