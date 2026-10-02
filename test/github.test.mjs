@@ -78,6 +78,7 @@ const pendingScript = (extra, threads = noThreads) => [
   { match: (a) => a.includes('--paginate') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: fx('reviews.json') },
   ...extra,
 ];
+const writes = (calls) => calls.filter((c) => c.input !== undefined || c.args.includes('DELETE'));
 const newComment = { path: 'src/c.js', line: 8, body: 'New finding.' };
 // What gh gives for a GraphQL `errors` answer: ghError tags it, and only such a refusal may start a rebuild.
 const gqlError = (msg) => Object.assign(new Error(`gh api graphql failed: ${msg}`), { graphql: true });
@@ -354,4 +355,31 @@ test('the fallback refuses and deletes nothing when GitHub does not say which co
   ]);
   await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: tmpdir() }), /which commit/);
   assert.ok(!calls.some((c) => c.args.includes('DELETE')));
+});
+
+test('draft with only a body creates the pending review when I have none', async () => {
+  const { gh, calls } = fakeGh([
+    noThreads,
+    { match: has('api', 'user'), reply: { login: 'nobody' } },
+    { match: (a) => a.includes('--paginate'), reply: fx('reviews.json') },
+    { match: (a, input) => input && a.includes('POST') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: { id: 1005 } },
+  ]);
+  const r = await draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [], body: 'Looks good overall.', backupDir: tmpdir() });
+  assert.deepEqual(r, { review_id: 1005, created: true, recreated: false });
+  const post = calls.at(-1).input;
+  assert.equal('event' in post, false);
+  assert.equal(post.body, 'Looks good overall.');
+  assert.equal(post.commit_id, 'abc');
+  assert.ok(!post.comments?.length, 'no comments');
+});
+
+test('draft with no comments refuses when I have a pending review or give no body', async () => {
+  const { gh, calls } = fakeGh(pendingScript([]));
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [], body: 'New summary.', backupDir: tmpdir() }), /already have a pending review.*Nothing was changed/);
+  assert.equal(writes(calls).length, 0);
+  for (const body of [undefined, '  \n']) {
+    const f = fakeGh([]);
+    await assert.rejects(draft(f.gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [], body, backupDir: tmpdir() }), /at least one comment.*Nothing was changed/);
+    assert.equal(f.calls.length, 0);
+  }
 });

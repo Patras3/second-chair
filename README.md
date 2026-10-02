@@ -166,7 +166,7 @@ With the plugin alone, these commands run inside Claude Code. See [Where the com
 | `second-chair serve [--port N]` | Runs the server in the foreground. |
 | `second-chair threads [PR]` | Prints the unresolved review threads as JSON. Your own pending comments are left out. |
 | `second-chair pending [PR]` | Prints your pending review and its comments as JSON, or `null`. |
-| `second-chair draft [PR] <comments.json> [--body-file F]` | Adds comments to your pending review. Creates the review when you have none. |
+| `second-chair draft [PR] <comments.json> [--body-file F]` | Adds comments to your pending review. Creates the review when you have none. With only `--body-file F`, it starts a review that has just a body. |
 | `second-chair build --repo O/N --pr N --round R --head SHA [--mode review] <items.json>...` | Wraps items into a payload, checks it and prints it. |
 | `second-chair push <payload.json>` | Hands the proposals to the server, so the page shows them. |
 | `second-chair wait --repo O/N --pr N --round R [--timeout S]` | Waits until you send the decisions, then prints them. |

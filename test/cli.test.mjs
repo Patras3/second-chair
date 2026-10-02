@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { createServer } from 'node:net';
 import { probe } from '../lib/daemon.mjs';
 import { buildPayload } from '../lib/payload.mjs';
+import { draftArgs } from '../lib/cli.mjs';
 
 const run = promisify(execFile);
 const BIN = new URL('../bin/second-chair', import.meta.url).pathname;
@@ -127,4 +128,14 @@ test('build refuses auto on a final-round verdict that posts', () => {
   assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 2, head: 'h', items: [{ thread_id: 'A', verdict: 'publish', auto: true, reply_en: 'x' }] }), /^Error: A: auto cannot be used with publish in the final round; the user must approve every posted text$/);
   assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 2, head: 'h', mode: 'review', items: [{ thread_id: 'C1', comment_id: 1, verdict: 'post', auto: true, reply_en: 'x' }] }), /C1: auto cannot be used with post in the final round/);
   assert.equal(buildPayload({ repo: 'o/n', pr: 1, round: 2, head: 'h', items: [{ thread_id: 'A', verdict: 'manual', auto: true, reply_en: '' }] }).items.length, 1);
+});
+
+test('draft takes a pull request and a comments file, and only a body file for a review with no comments', () => {
+  assert.deepEqual(draftArgs(['42', 'c.json'], undefined), { pr: '42', file: 'c.json' });
+  assert.deepEqual(draftArgs(['c.json'], undefined), { pr: undefined, file: 'c.json' });
+  assert.deepEqual(draftArgs(['c.json'], 'body.md'), { pr: undefined, file: 'c.json' });
+  assert.deepEqual(draftArgs(['42'], 'body.md'), { pr: '42', file: null });
+  assert.deepEqual(draftArgs(['https://github.com/octo-org/example/pull/42'], 'body.md'), { pr: 'https://github.com/octo-org/example/pull/42', file: null });
+  assert.deepEqual(draftArgs([], 'body.md'), { pr: undefined, file: null });
+  assert.deepEqual(draftArgs([], undefined), { pr: undefined, file: null });
 });
