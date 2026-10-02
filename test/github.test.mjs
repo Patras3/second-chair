@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { draft, shapeThreads, fetchThreads, fetchPending, resolvePr, parseGhVersion, versionAtLeast, GH_FLOOR } from '../lib/github.mjs';
@@ -44,6 +44,7 @@ test('fetchPending finds only my pending review, with comment anchors', async ()
   const p = await fetchPending(gh, { repo: 'octo-org/example', pr: 3 });
   assert.equal(p.review_id, 901);
   assert.equal(p.node_id, 'PRR_me');
+  assert.equal(p.commit_id, 'abc');
   assert.equal(p.body, 'Overall fine.');
   assert.deepEqual(p.comments[0], { id: 5001, node_id: 'PRRC_1', path: 'src/a.js', line: 12, start_line: null, side: 'RIGHT', position: 4, body: 'Rename this?' });
   const none = fakeGh([{ match: has('user'), reply: { login: 'nobody' } }, { match: has('pulls/3/reviews'), reply: fx('reviews.json') }]);
@@ -114,7 +115,7 @@ test('when GraphQL refuses, draft saves my comments, then recreates the review w
   const dir = mkdtempSync(join(tmpdir(), 'sc-draft-'));
   const { gh, calls } = fakeGh(pendingScript([
     { match: has('graphql'), reply: () => { throw new Error('gh api graphql failed: not supported'); } },
-    { match: (a) => a.includes('DELETE') && a.some((x) => x.endsWith('reviews/901')), reply: {} },
+    { match: (a) => a.includes('DELETE') && a.some((x) => x.endsWith('reviews/901')), reply: () => { assert.equal(readdirSync(dir).length, 1, 'backup exists before the delete'); return {}; } },
     { match: (a, input) => input && a.includes('POST'), reply: { id: 1001 } },
   ]));
   const r = await draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: dir });
@@ -140,5 +141,49 @@ test('the fallback refuses and deletes nothing when one of my comments has no an
     { match: has('graphql'), reply: () => { throw new Error('nope'); } },
   ]);
   await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: tmpdir() }), /comment 5001 has no line/);
+  assert.ok(!calls.some((c) => c.args.includes('DELETE')));
+});
+
+const refuseGraphql = { match: has('graphql'), reply: () => { throw new Error('not supported'); } };
+
+test('when the recreate fails, draft restores my own comments and names the backup', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sc-draft-'));
+  let posts = 0;
+  const { gh, calls } = fakeGh(pendingScript([
+    refuseGraphql,
+    { match: (a) => a.includes('DELETE'), reply: {} },
+    { match: (a, input) => input && a.includes('POST'), reply: () => { if (posts++ === 0) throw new Error('422 line not in diff'); return { id: 1002 }; } },
+  ]));
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: dir }), (e) => {
+    assert.match(e.message, /recreated with your own comments, but the new ones were not added \(422 line not in diff\)/);
+    assert.ok(e.message.includes(dir));
+    return true;
+  });
+  const restore = calls.at(-1).input;
+  assert.deepEqual(restore.comments.map((c) => c.body), ['Rename this?', 'Extract a helper.']);
+  assert.equal(restore.body, 'Overall fine.');
+});
+
+test('when the restore fails too, the error says the review is gone and where the backup is', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sc-draft-'));
+  const { gh } = fakeGh(pendingScript([
+    refuseGraphql,
+    { match: (a) => a.includes('DELETE'), reply: {} },
+    { match: (a, input) => input && a.includes('POST'), reply: () => { throw new Error('boom'); } },
+  ]));
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: dir }), (e) => /was deleted and could not be recreated/.test(e.message) && e.message.includes(dir));
+});
+
+test('draft refuses a bad new comment before any gh call', async () => {
+  const { gh, calls } = fakeGh([]);
+  for (const bad of [{ path: 'a.js', body: 'x' }, { path: '', line: 1, body: 'x' }, { path: 'a.js', line: 3, start_line: 3, body: 'x' }, { path: 'a.js', line: 3, side: 'UP', body: 'x' }, { path: 'a.js', line: 3, body: ' ' }]) {
+    await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [bad], backupDir: tmpdir() }), /Nothing was changed/);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('the fallback refuses and deletes nothing when my review is on another commit', async () => {
+  const { gh, calls } = fakeGh(pendingScript([refuseGraphql]));
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'def', comments: [newComment], backupDir: tmpdir() }), /moved|move your comments/);
   assert.ok(!calls.some((c) => c.args.includes('DELETE')));
 });
