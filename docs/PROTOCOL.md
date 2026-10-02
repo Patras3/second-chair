@@ -226,7 +226,7 @@ For the threads on your own pull request.
 For a review of someone else's pull request.
 
 1. `second-chair doctor`, then `second-chair pending <PR>`. It prints your pending review, or `null`.
-2. Write the new comments to `comments.json` and run `second-chair draft <PR> comments.json`. Add `--body-file body.md` only when `pending` printed `null`. `draft` prints the pending review with every comment id. With no new comments and no pending review, run `second-chair draft <PR> --body-file body.md` alone. It creates the review with only the body. With no new comments and a pending review, skip `draft`.
+2. Write the new comments to `comments.json` and run `second-chair draft <PR> comments.json`. Add `--body-file body.md` only when `pending` printed `null`. `draft` prints one status line on stderr and the pending review with every comment id as JSON on stdout, so `draft ... > pending.json` gives a valid JSON file. With no new comments and no pending review, run `second-chair draft <PR> --body-file body.md` alone. It creates the review with only the body. With no new comments and a pending review, skip `draft`.
 3. Write one item per pending comment (`thread_id: "C<id>"`) and one `BODY` item with `comment_id: null`. A comment or body the user wrote gets `origin: "user"` and keeps the user's text in `original_en`.
 4. `second-chair build --repo O/N --pr N --mode review --round 1 --head SHA items.json > r1.json`, then `push` and `wait --round 1`.
 5. Rewrite each `revise` item as its note says.
