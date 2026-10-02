@@ -190,6 +190,22 @@ test('step wraps around and starts at an end when nothing is selected', () => {
   assert.equal(step([], 'x', 1), null);
 });
 
+test('markdown is cleaned of data attributes, styles, forms and form controls', () => {
+  // DOMPurify needs a real DOM, so this checks the settings; the smoke test checks the output in Chromium.
+  let seen;
+  globalThis.marked = { parse: (t) => t };
+  globalThis.DOMPurify = { sanitize: (html, cfg) => { seen = cfg; return html; } };
+  try {
+    renderMarkdown('text');
+    assert.equal(seen?.ALLOW_DATA_ATTR, false);
+    for (const tag of ['style', 'form', 'button', 'textarea', 'select', 'input']) assert.ok(seen.FORBID_TAGS.includes(tag), tag);
+    assert.ok(seen.FORBID_ATTR.includes('style'));
+  } finally {
+    delete globalThis.marked;
+    delete globalThis.DOMPurify;
+  }
+});
+
 test('markdown falls back to escaped text when marked is not loaded', () => {
   assert.equal(renderMarkdown('a `b` <c>'), '<p>a <code>b</code> &lt;c&gt;</p>');
   assert.equal(renderMarkdown('  '), '');

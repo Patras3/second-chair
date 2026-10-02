@@ -66,6 +66,25 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check(await page.locator(`${card('T3')}.sc-compact`).count() === 1, 'an auto card is compact');
   check((await page.textContent(card('T2'))).includes('S2 legacy field'), 'the older summary_pl field still shows');
 
+  // Markdown from a payload cannot plant controls or page styles.
+  const cleaned = await page.evaluate(() => renderMarkdown('<a data-sc-act="decide" data-sc-id="T2" data-sc-val="fix" style="position:fixed;inset:0">x</a><style>body{display:none}</style><form><button>b</button><input><textarea></textarea><select></select></form>'));
+  check(!/data-sc|style|<form|<button|<input|<textarea|<select/.test(cleaned) && cleaned.includes('x</a>'), 'rendered markdown keeps no data-sc attributes, styles, forms or controls');
+  // A control that still reached a .sc-md block, or one outside the Second Chair UI, does nothing.
+  await page.evaluate(() => {
+    const forge = (where, act, val) => { const a = document.createElement('a'); a.href = '#'; a.className = `forged-${act}`; a.dataset.scAct = act; a.dataset.scId = 'T2'; if (val) a.dataset.scVal = val; a.textContent = 'forged'; where.appendChild(a); };
+    forge(document.querySelector('.sc-card[data-sc-where=inline][data-sc-card=T1] .sc-md'), 'decide', 'fix');
+    forge(document.body, 'panel');
+    forge(document.body, 'decide', 'pushback');
+  });
+  const undecided = async () => (await page.textContent('.sc-toggle')).includes('3/6') && await page.locator(`${card('T2')}.sc-decided`).count() === 0;
+  await page.click('.sc-md .forged-decide');
+  check(await undecided(), 'a forged decide control inside rendered markdown decides nothing');
+  await page.click('body > .forged-decide');
+  check(await undecided(), 'a forged decide control elsewhere on the page decides nothing');
+  await page.click('body > .forged-panel');
+  check(await page.evaluate(() => document.querySelector('.sc-panel').hidden), 'a forged panel control on the page opens nothing');
+  await page.evaluate(() => document.querySelectorAll('[class^=forged-]').forEach((n) => n.remove()));
+
   const keys = await openPage(browser, port);
   await keys.waitForSelector(card('T2'));
   await keys.click('.sc-toggle');

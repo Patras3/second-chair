@@ -80,6 +80,14 @@ function richText(s) {
   return esc(s).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
 }
 
+// Markdown comes from the payload. It may not carry page styles, forms or the data-sc-* attributes that the
+// click handler acts on. Task-list checkboxes are inputs, so they are lost too.
+const SC_PURIFY = {
+  ALLOW_DATA_ATTR: false,
+  FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'input'],
+  FORBID_ATTR: ['style'],
+};
+
 /** Markdown as sanitized HTML when marked and DOMPurify are loaded; plain text with code spans otherwise. */
 function renderMarkdown(md) {
   const text = String(md ?? '');
@@ -87,7 +95,7 @@ function renderMarkdown(md) {
   const m = typeof marked !== 'undefined' ? marked : null;
   const purify = typeof DOMPurify !== 'undefined' ? DOMPurify : null;
   if (m && purify && typeof purify.sanitize === 'function') {
-    return purify.sanitize(m.parse(text, { gfm: true, breaks: false }));
+    return purify.sanitize(m.parse(text, { gfm: true, breaks: false }), SC_PURIFY);
   }
   return `<p>${richText(text)}</p>`;
 }
@@ -878,8 +886,15 @@ function secondChairBootstrap() {
     else set.add(id);
   }
 
+  /** The element of a Second Chair control, or null for anything the page or a payload's markdown put there. */
+  function ownControl(target, selector) {
+    const el = target?.closest?.(selector);
+    if (!el || !el.closest('.sc-card, .sc-panel, .sc-toggle') || el.closest('.sc-md')) return null;
+    return el;
+  }
+
   document.addEventListener('click', async (e) => {
-    const el = e.target.closest('[data-sc-act]');
+    const el = ownControl(e.target, '[data-sc-act]');
     if (!el) return;
     const act = el.dataset.scAct;
     const id = el.dataset.scId;
@@ -970,16 +985,18 @@ function secondChairBootstrap() {
         }
       }
     } else if (act === 'decide') {
-      const d = state.decisions[id];
-      d.decision = d.decision === el.dataset.scVal ? null : el.dataset.scVal;
+      const d = state?.decisions[id];
+      const key = el.dataset.scVal;
+      if (!d || done() || !decisionsFor(state.payload).some((b) => b.key === key)) return;
+      d.decision = d.decision === key ? null : key;
       save();
       refreshThread(id);
     }
   });
 
   document.addEventListener('change', (e) => {
-    const el = e.target;
-    if (el.dataset?.scAct !== 'filterselect') return;
+    const el = ownControl(e.target, '[data-sc-act=filterselect]');
+    if (!el) return;
     ui.filter = el.value || 'all';
     saveUi();
     renderPanel();
@@ -1018,15 +1035,17 @@ function secondChairBootstrap() {
   }, true);
 
   document.addEventListener('input', (e) => {
-    const el = e.target;
-    if (el.classList?.contains('sc-paste')) {
+    const el = ownControl(e.target, '.sc-paste, [data-sc-field]');
+    if (!el) return;
+    if (el.classList.contains('sc-paste')) {
       if (el.value.trim().startsWith('{') && el.value.trim().endsWith('}')) adopt(parsePayload(el.value), 'clipboard');
       return;
     }
-    const name = el.dataset?.scField;
-    if (!name || !state) return;
+    const name = el.dataset.scField;
+    if (!name || !state || done()) return;
     const id = el.dataset.scId;
     const d = state.decisions[id];
+    if (!d) return;
     if (name === 'reply') {
       d.reply = el.value;
       d.replyEdited = d.reply !== (itemById(id).reply_en ?? '');
