@@ -80,12 +80,12 @@ function richText(s) {
   return esc(s).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
 }
 
-// Markdown comes from the payload. It may not carry page styles, forms or the data-sc-* attributes that the
-// click handler acts on. Task-list checkboxes are inputs, so they are lost too.
+// Markdown comes from the payload. It may not carry page styles, classes, forms or the data-sc-* attributes that the
+// click handler acts on. A class could pose as the panel or pull in page and script styles. Task-list checkboxes are inputs, so they are lost too.
 const SC_PURIFY = {
   ALLOW_DATA_ATTR: false,
   FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'input'],
-  FORBID_ATTR: ['style'],
+  FORBID_ATTR: ['style', 'class'],
 };
 
 /** Markdown as sanitized HTML when marked and DOMPurify are loaded; plain text with code spans otherwise. */
@@ -599,6 +599,11 @@ function secondChairBootstrap() {
     });
   }
 
+  // The shell is always a direct child of body. Looking it up by class anywhere in the document could hit a copy
+  // that came in with page content.
+  const shellPanel = () => document.body.querySelector(':scope > .sc-panel');
+  const shellToggle = () => document.body.querySelector(':scope > .sc-toggle');
+
   function ensureShell() {
     if (!document.getElementById('sc-style')) {
       const style = document.createElement('style');
@@ -606,7 +611,7 @@ function secondChairBootstrap() {
       style.textContent = SC_CSS;
       document.head.appendChild(style);
     }
-    if (!document.querySelector('.sc-toggle')) {
+    if (!shellToggle()) {
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'sc-toggle';
@@ -620,12 +625,13 @@ function secondChairBootstrap() {
   }
 
   function removeShell() {
-    document.querySelectorAll('.sc-toggle, .sc-panel, .sc-card[data-sc-where=inline]').forEach((n) => n.remove());
+    document.body.querySelectorAll(':scope > .sc-toggle, :scope > .sc-panel').forEach((n) => n.remove());
+    document.querySelectorAll('.sc-card[data-sc-where=inline]').forEach((n) => n.remove());
     document.documentElement.classList.remove('sc-shift-narrow', 'sc-shift-wide');
   }
 
   function applyLayout() {
-    const panel = document.querySelector('.sc-panel');
+    const panel = shellPanel();
     if (!panel) return;
     panel.hidden = !ui.open;
     panel.classList.toggle('sc-wide', ui.wide);
@@ -635,8 +641,8 @@ function secondChairBootstrap() {
   }
 
   function renderPanel() {
-    const panel = document.querySelector('.sc-panel');
-    const toggle = document.querySelector('.sc-toggle');
+    const panel = shellPanel();
+    const toggle = shellToggle();
     if (!panel || !toggle) return;
     const listEl = panel.querySelector('.sc-list');
     const scrollTop = listEl ? listEl.scrollTop : 0;
@@ -675,20 +681,20 @@ function secondChairBootstrap() {
   /** Updates the counter, the send button and the note markers in place, so typing a note keeps its focus. */
   function updateProgress(id) {
     const pr = progress(state);
-    const toggle = document.querySelector('.sc-toggle');
+    const toggle = shellToggle();
     if (toggle && !done()) toggle.innerHTML = `<span class="sc-mark">SC</span> ${pr.done}/${pr.total}`;
     toggle?.classList.toggle('sc-complete', pr.complete && !done());
-    const send = document.querySelector('.sc-panel [data-sc-act=export]');
+    const send = shellPanel()?.querySelector('[data-sc-act=export]');
     if (send) {
       send.disabled = !(pr.complete && !done());
       send.textContent = pr.complete ? 'Send decisions' : `Send decisions · ${pr.total - pr.done} left`;
     }
     const bar = (n) => `${pr.total ? (100 * n) / pr.total : 0}%`;
-    const mine = document.querySelector('.sc-panel .sc-p-mine');
+    const mine = shellPanel()?.querySelector('.sc-p-mine');
     if (mine) mine.style.width = bar(pr.done - pr.auto);
-    const nDone = document.querySelector('.sc-panel .sc-n-done');
+    const nDone = shellPanel()?.querySelector('.sc-n-done');
     if (nDone) nDone.textContent = pr.done;
-    const left = document.querySelector('.sc-panel .sc-left');
+    const left = shellPanel()?.querySelector('.sc-left');
     if (left) left.textContent = pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send';
     const it = itemById(id);
     const parts = rowParts(state, it, viewOf(it));
@@ -1066,9 +1072,9 @@ function secondChairBootstrap() {
 
   function needsRender() {
     const now = parseLocation(location.pathname);
-    if (!now) return Boolean(document.querySelector('.sc-toggle'));
+    if (!now) return Boolean(shellToggle());
     if (!loc || now.repo !== loc.repo || now.number !== loc.number) return true;
-    if (!document.querySelector('.sc-toggle')) return true;
+    if (!shellToggle()) return true;
     return showInline() && state.payload.items.some((it) => anchorFor(it) && !inlineCard(it.thread_id));
   }
 

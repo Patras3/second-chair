@@ -212,6 +212,7 @@ test('markdown is cleaned of data attributes, styles, forms and form controls', 
     assert.equal(seen?.ALLOW_DATA_ATTR, false);
     for (const tag of ['style', 'form', 'button', 'textarea', 'select', 'input']) assert.ok(seen.FORBID_TAGS.includes(tag), tag);
     assert.ok(seen.FORBID_ATTR.includes('style'));
+    assert.ok(seen.FORBID_ATTR.includes('class'));
   } finally {
     delete globalThis.marked;
     delete globalThis.DOMPurify;

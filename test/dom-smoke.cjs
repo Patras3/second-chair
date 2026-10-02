@@ -68,6 +68,8 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
 
   // Markdown from a payload cannot plant controls or page styles.
   const cleaned = await page.evaluate(() => renderMarkdown('<a data-sc-act="decide" data-sc-id="T2" data-sc-val="fix" style="position:fixed;inset:0">x</a><style>body{display:none}</style><form><button>b</button><input><textarea></textarea><select></select></form>'));
+  const classy = await page.evaluate(() => renderMarkdown('<div class="sc-panel sc-toggle sc-card">x</div>'));
+  check(!/class/.test(classy) && classy.includes('x</div>'), 'rendered markdown drops the class attribute');
   check(!/data-sc|style|<form|<button|<input|<textarea|<select/.test(cleaned) && cleaned.includes('x</a>'), 'rendered markdown keeps no data-sc attributes, styles, forms or controls');
   // A control that still reached a .sc-md block, or one outside the Second Chair UI, does nothing.
   await page.evaluate(() => {
@@ -246,6 +248,26 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await rv.waitForSelector('.sc-banner-done');
   const closedNow = await api('GET', '/api/proposals?repo=acme/w&pr=8');
   check(JSON.parse(closedNow.responseText).closed_at, 'Mark as done closes the triage on the server');
+
+  // Markdown cannot pose as the shell: a class attribute in a payload is dropped, and the real panel is found by reference.
+  await api('PUT', '/api/proposals', {
+    tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 9, round: 1, head: 'ghi',
+    items: [
+      { thread_id: 'F1', comment_id: 11, author: 'bob', path: 'a.md', line: 1, verdict: 'fix', reply_en: 'Fine.', context: '<div class="sc-panel sc-toggle sc-card">FAKE PANEL</div>' },
+    ],
+  });
+  const fk = await openPage(browser, port, null, 9);
+  await fk.waitForSelector(card('F1'));
+  await fk.click('.sc-toggle');
+  await fk.waitForSelector('body > .sc-panel .sc-msg');
+  check(await fk.locator('.sc-md .sc-panel, .sc-md .sc-toggle, .sc-md .sc-card, .sc-md [class]').count() === 0, 'no class survives inside rendered markdown');
+  check(await fk.evaluate(() => { const p = document.querySelector('body > .sc-panel'); const r = p.getBoundingClientRect(); return !p.hidden && r.width > 100 && r.height > 100 && p.querySelector('.sc-row') !== null; }), 'the real panel is open and rendered despite a fake one in the markdown');
+  await fk.click(`${card('F1')} [data-sc-val=fix]`);
+  check(!(await fk.isDisabled('body > .sc-panel [data-sc-act=export]')), 'a decision unlocks Send decisions in the real panel');
+  await fk.click('body > .sc-panel [data-sc-act=export]');
+  await fk.waitForSelector('body > .sc-panel .sc-banner');
+  const fgot = await api('GET', '/api/decisions?repo=acme/w&pr=9&round=1');
+  check(fgot.status === 200 && JSON.parse(fgot.responseText).decisions.find((d) => d.thread_id === 'F1')?.decision === 'fix', 'Send decisions reaches the server');
 
   await browser.close();
   server.close();

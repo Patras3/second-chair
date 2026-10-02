@@ -152,7 +152,7 @@ The keys work when the panel is open and the focus is not in a text field.
 - Nothing is posted where others can see it, except through `second-chair publish`. It posts the text from your final-round decisions, and records each action. A second run skips what is already done.
 - In review mode, `second-chair draft` writes the agent's findings to your pending review. A pending review stays visible only to you until you submit it.
 - The skills tell the agent never to post, edit or resolve anything by hand, and never to touch comments by other people.
-- The cards render markdown with `marked` and clean it with `DOMPurify`. Both load from jsDelivr at fixed versions. The cleanup also removes styles, forms and form controls, so a payload cannot put working buttons on the page.
+- The cards render markdown with `marked` and clean it with `DOMPurify`. Both load from jsDelivr at fixed versions. The cleanup also removes styles, classes, forms and form controls, so a payload cannot put working buttons on the page.
 
 ## Commands
 
