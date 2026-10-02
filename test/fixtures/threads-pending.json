@@ -1,0 +1,14 @@
+{"data":{"repository":{"pullRequest":{"reviewThreads":{
+  "pageInfo":{"hasNextPage":false,"endCursor":"P1"},
+  "nodes":[
+    {"id":"PRRT_s","isResolved":false,"isOutdated":false,"path":"src/s.js","line":3,"originalLine":3,"startLine":3,"diffSide":"RIGHT","startDiffSide":null,
+     "comments":{"pageInfo":{"hasNextPage":false},"nodes":[
+       {"databaseId":41,"state":"SUBMITTED","author":{"login":"ana-ng"},"createdAt":"2026-09-01T10:00:00Z","body":"Why?","url":"https://github.com/octo-org/example/pull/3#discussion_r41","pullRequestReview":{"databaseId":700}},
+       {"databaseId":5003,"state":"PENDING","author":{"login":"me"},"createdAt":"2026-09-02T10:00:00Z","body":"My draft reply.","url":"https://github.com/octo-org/example/pull/3#discussion_r5003","pullRequestReview":{"databaseId":901}}]}},
+    {"id":"PRRT_p1","isResolved":false,"isOutdated":false,"path":"src/a.js","line":12,"originalLine":12,"startLine":12,"diffSide":"RIGHT","startDiffSide":null,
+     "comments":{"pageInfo":{"hasNextPage":false},"nodes":[
+       {"databaseId":5001,"state":"PENDING","author":{"login":"me"},"createdAt":"2026-09-02T10:00:00Z","body":"Rename this?","url":"https://github.com/octo-org/example/pull/3#discussion_r5001","pullRequestReview":{"databaseId":901}}]}},
+    {"id":"PRRT_p2","isResolved":false,"isOutdated":false,"path":"src/b.js","line":7,"originalLine":7,"startLine":5,"diffSide":"LEFT","startDiffSide":"LEFT",
+     "comments":{"pageInfo":{"hasNextPage":false},"nodes":[
+       {"databaseId":5002,"state":"PENDING","author":{"login":"me"},"createdAt":"2026-09-02T10:00:00Z","body":"Extract a helper.","url":"https://github.com/octo-org/example/pull/3#discussion_r5002","pullRequestReview":{"databaseId":901}}]}}
+  ]}}}}}

@@ -16,6 +16,15 @@ function fakeServer({ proposals, decisions }) {
   return { api, published };
 }
 
+// fetchPending asks for these; in reply mode publish asks only when it has a reply to post.
+const noThreads = { match: (a) => a.includes('graphql') && a.some((x) => x.startsWith('query=')), reply: { data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] } } } } } };
+const noPending = [
+  noThreads,
+  { match: has('api', 'user'), reply: { login: 'me' } },
+  { match: (a) => a.includes('--paginate') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: [[]] },
+];
+const writes = (calls) => calls.filter((c) => c.input !== undefined || c.args.includes('DELETE'));
+
 const tricky = 'Fixed in `abc`.\n\n- "quotes" and $HOME\n@ana-ng thanks';
 const replyRound2 = {
   tool: 'second-chair', kind: 'proposals', repo: 'octo-org/example', pr: 3, round: 2, head: 'h',
@@ -39,6 +48,7 @@ const replyDecisions = {
 test('respond mode posts exactly the approved texts, and nothing for hold', async () => {
   const srv = fakeServer({ proposals: replyRound2, decisions: replyDecisions });
   const { gh, calls } = fakeGh([
+    ...noPending,
     { match: has('issues/3/comments'), reply: { html_url: 'g' } },
     { match: has('pulls/3/comments/11/replies'), reply: { html_url: 'r11' } },
     { match: has('pulls/3/comments/31/replies'), reply: { html_url: 'r31' } },
@@ -59,17 +69,18 @@ test('respond mode posts nothing for hold or manual, and never from the proposal
     ],
   };
   const srv = fakeServer({ proposals: replyRound2, decisions });
-  const { gh, calls } = fakeGh([{ match: has('comments/31/replies'), reply: { html_url: 'r31' } }]);
+  const { gh, calls } = fakeGh([...noPending, { match: has('comments/31/replies'), reply: { html_url: 'r31' } }]);
   const r = await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
   assert.deepEqual(r.done, ['T3']);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].input.body, 'approved text');
+  assert.equal(writes(calls).length, 1);
+  assert.equal(writes(calls)[0].input.body, 'approved text');
 });
 
 test('a second run after a failure posts nothing twice', async () => {
   const srv = fakeServer({ proposals: replyRound2, decisions: replyDecisions });
   let fail = true;
   const script = [
+    ...noPending,
     { match: has('issues/3/comments'), reply: { html_url: 'g' } },
     { match: has('comments/11/replies'), reply: { html_url: 'r11' } },
     { match: has('comments/31/replies'), reply: () => { if (fail) throw new Error('network'); return { html_url: 'r31' }; } },
@@ -81,7 +92,7 @@ test('a second run after a failure posts nothing twice', async () => {
   const r = await publish({ gh: second.gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
   assert.deepEqual(r.skipped, ['G', 'T1']);
   assert.deepEqual(r.done, ['T3']);
-  assert.equal(second.calls.length, 1);
+  assert.equal(writes(second.calls).length, 1);
 });
 
 test('publish refuses to run before the final round has decisions', async () => {
@@ -107,12 +118,15 @@ const reviewDecisions = (body = 'Two notes.') => ({
     { thread_id: 'C2', comment_id: 5002, decision: 'drop', reply_en: 'Extract a helper.' },
   ],
 });
-const pendingFixture = { review_id: 901, node_id: 'PRR_me', body: 'Overall fine.', comments: [{ id: 5001, body: 'Rename this?' }, { id: 5002, body: 'Extract a helper.' }] };
-const reviewGh = (extra = []) => fakeGh([
+const pendingFixture = { review_id: 901, node_id: 'PRR_me', body: 'Overall fine.', comments: [{ id: 5001, node_id: 'PRRC_5001', body: 'Rename this?' }, { id: 5002, node_id: 'PRRC_5002', body: 'Extract a helper.' }] };
+// Live check, 2026-10-02: REST PATCH on a pending comment answers 404; the GraphQL mutation edits it.
+const editMutation = (a, input) => a.includes('graphql') && /updatePullRequestReviewComment/.test(input?.query ?? '');
+const reviewGh = (extra = [], reviewBody = 'Overall fine.') => fakeGh([
+  noThreads,
   { match: has('api', 'user'), reply: { login: 'me' } },
   { match: has('reviews/901/comments'), reply: [pendingFixture.comments] },
-  { match: (a) => a.includes('--paginate') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: [[{ id: 901, node_id: 'PRR_me', state: 'PENDING', user: { login: 'me' }, body: 'Overall fine.' }]] },
-  { match: (a) => a.includes('PATCH') && a.some((x) => x.endsWith('pulls/comments/5001')), reply: {} },
+  { match: (a) => a.includes('--paginate') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: [[{ id: 901, node_id: 'PRR_me', state: 'PENDING', user: { login: 'me' }, body: reviewBody }]] },
+  { match: editMutation, reply: { data: { updatePullRequestReviewComment: { pullRequestReviewComment: { id: 'PRRC_x' } } } } },
   { match: (a) => a.includes('DELETE') && a.some((x) => x.endsWith('pulls/comments/5002')), reply: {} },
   { match: (a) => a.includes('PUT') && a.some((x) => x.endsWith('reviews/901')), reply: {} },
   ...extra,
@@ -122,7 +136,9 @@ test('review mode edits and drops pending comments and does not submit by defaul
   const srv = fakeServer({ proposals: reviewRound2, decisions: reviewDecisions() });
   const { gh, calls } = reviewGh();
   await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
-  assert.equal(calls.find((c) => c.args.includes('PATCH')).input.body, 'Rename this to `size`?');
+  const edit = calls.find((c) => editMutation(c.args, c.input));
+  assert.deepEqual(edit.input.variables, { id: 'PRRC_5001', body: 'Rename this to `size`?' });
+  assert.ok(!calls.some((c) => c.args.includes('PATCH')), 'no REST PATCH');
   assert.ok(calls.some((c) => c.args.includes('DELETE')));
   assert.equal(calls.find((c) => c.args.includes('PUT')).input.body, 'Two notes.');
   assert.ok(!calls.some((c) => c.args.some((a) => a.endsWith('/events'))), 'no submit');
@@ -139,6 +155,7 @@ test('review mode submits only with --submit, with the named event', async () =>
 test('review mode fails clearly when the pending review is gone', async () => {
   const srv = fakeServer({ proposals: reviewRound2, decisions: reviewDecisions() });
   const { gh } = fakeGh([
+    noThreads,
     { match: has('api', 'user'), reply: { login: 'me' } },
     { match: (a) => a.includes('--paginate'), reply: [[]] },
   ]);
@@ -178,10 +195,10 @@ test('an explicit drop of the review body still clears it', async () => {
 test('the target comment comes from the proposals, not from the decision', async () => {
   const wrong = { ...replyDecisions, decisions: [{ thread_id: 'T1', comment_id: 999, decision: 'publish', reply_en: 'ok' }] };
   const srv = fakeServer({ proposals: replyRound2, decisions: wrong });
-  const { gh, calls } = fakeGh([{ match: has('comments/11/replies'), reply: { html_url: 'r11' } }]);
+  const { gh, calls } = fakeGh([...noPending, { match: has('comments/11/replies'), reply: { html_url: 'r11' } }]);
   await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
-  assert.equal(calls.length, 1);
-  assert.ok(calls[0].args.some((a) => a.includes('/comments/11/replies')));
+  assert.equal(writes(calls).length, 1);
+  assert.ok(writes(calls)[0].args.some((a) => a.includes('/comments/11/replies')));
 
   const rev = reviewDecisions();
   rev.decisions[1].comment_id = 5002;
@@ -189,6 +206,35 @@ test('the target comment comes from the proposals, not from the decision', async
   const srv2 = fakeServer({ proposals: reviewRound2, decisions: rev });
   const g2 = reviewGh();
   await publish({ gh: g2.gh, api: srv2.api, repo: 'octo-org/example', pr: 3, log: () => {} });
-  assert.ok(g2.calls.find((c) => c.args.includes('PATCH')).args.some((a) => a.endsWith('comments/5001')));
+  assert.equal(g2.calls.find((c) => editMutation(c.args, c.input)).input.variables.id, 'PRRC_5001');
   assert.ok(g2.calls.find((c) => c.args.includes('DELETE')).args.some((a) => a.endsWith('comments/5002')));
+});
+
+// Live check, 2026-10-02: GitHub answers 422 "user_id can only have one pending review per pull request".
+test('respond mode posts nothing while I have a pending review on the pull request', async () => {
+  const srv = fakeServer({ proposals: replyRound2, decisions: replyDecisions });
+  const { gh, calls } = fakeGh([
+    noThreads,
+    { match: has('api', 'user'), reply: { login: 'me' } },
+    { match: has('reviews/901/comments'), reply: [[]] },
+    { match: (a) => a.includes('--paginate') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: [[{ id: 901, node_id: 'PRR_me', state: 'PENDING', user: { login: 'me' }, body: '' }]] },
+  ]);
+  await assert.rejects(publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /pending review on octo-org\/example#3.*Nothing was posted/);
+  assert.equal(writes(calls).length, 0);
+  assert.deepEqual(srv.published, {});
+});
+
+// Live check, 2026-10-02: GitHub answers 422 "Could not edit a review with a missing body" for a pending review with no body.
+test('a body for a pending review that has none goes with the submit, and is refused without one', async () => {
+  const srv = fakeServer({ proposals: reviewRound2, decisions: reviewDecisions() });
+  const g1 = reviewGh([], '');
+  await assert.rejects(publish({ gh: g1.gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /--submit.*Nothing was changed/);
+  assert.equal(writes(g1.calls).length, 0);
+
+  const g2 = reviewGh([{ match: has('reviews/901/events'), reply: {} }], '');
+  const r = await publish({ gh: g2.gh, api: srv.api, repo: 'octo-org/example', pr: 3, submit: 'COMMENT', log: () => {} });
+  assert.ok(!g2.calls.some((c) => c.args.includes('PUT')), 'no PUT');
+  assert.deepEqual(g2.calls.find((c) => c.args.some((a) => a.endsWith('/events'))).input, { event: 'COMMENT', body: 'Two notes.' });
+  assert.deepEqual(r.done, ['C1', 'C2', 'BODY']);
+  assert.equal(srv.published.BODY.action, 'body set');
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { draft, shapeThreads, fetchThreads, fetchPending, resolvePr, parseGhVersion, versionAtLeast, GH_FLOOR } from '../lib/github.mjs';
+import { draft, shapeThreads, fetchThreads, fetchPending, resolvePr, parseGhVersion, versionAtLeast, GH_FLOOR, ghError } from '../lib/github.mjs';
 import { fakeGh, has } from './fake-gh.mjs';
 
 const fx = (n) => JSON.parse(readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf8'));
@@ -35,8 +35,13 @@ test('fetchThreads follows pages and fails on a thread it cannot read whole', as
   await assert.rejects(fetchThreads(f2.gh, { repo: 'octo-org/example', pr: 3 }), /more than 100 comments/);
 });
 
+// The review threads query that fetchPending uses for anchors. The mutation in draft is sent through --input.
+const threadsQuery = (reply) => ({ match: (a) => a.includes('graphql') && a.some((x) => x.startsWith('query=')), reply });
+const noThreads = threadsQuery({ data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] } } } } });
+
 test('fetchPending finds only my pending review, with comment anchors', async () => {
   const { gh } = fakeGh([
+    noThreads,
     { match: has('user'), reply: { login: 'me' } },
     { match: has('pulls/3/reviews/901/comments'), reply: fx('review-comments.json') },
     { match: has('pulls/3/reviews'), reply: fx('reviews.json') },
@@ -46,7 +51,7 @@ test('fetchPending finds only my pending review, with comment anchors', async ()
   assert.equal(p.node_id, 'PRR_me');
   assert.equal(p.commit_id, 'abc');
   assert.equal(p.body, 'Overall fine.');
-  assert.deepEqual(p.comments[0], { id: 5001, node_id: 'PRRC_1', path: 'src/a.js', line: 12, start_line: null, side: 'RIGHT', position: 4, body: 'Rename this?' });
+  assert.deepEqual(p.comments[0], { id: 5001, node_id: 'PRRC_1', path: 'src/a.js', line: 12, start_line: null, side: 'RIGHT', start_side: null, position: 4, in_reply_to: null, body: 'Rename this?' });
   const none = fakeGh([{ match: has('user'), reply: { login: 'nobody' } }, { match: has('pulls/3/reviews'), reply: fx('reviews.json') }]);
   assert.equal(await fetchPending(none.gh, { repo: 'octo-org/example', pr: 3 }), null);
 });
@@ -66,7 +71,8 @@ test('gh version floor', () => {
   assert.equal(versionAtLeast('3.0.0', GH_FLOOR), true);
 });
 
-const pendingScript = (extra) => [
+const pendingScript = (extra, threads = noThreads) => [
+  threads,
   { match: has('api', 'user'), reply: { login: 'me' } },
   { match: has('pulls/3/reviews/901/comments'), reply: fx('review-comments.json') },
   { match: (a) => a.includes('--paginate') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: fx('reviews.json') },
@@ -76,6 +82,7 @@ const newComment = { path: 'src/c.js', line: 8, body: 'New finding.' };
 
 test('draft creates a pending review when I have none, with no event field', async () => {
   const { gh, calls } = fakeGh([
+    noThreads,
     { match: has('api', 'user'), reply: { login: 'nobody' } },
     { match: (a) => a.includes('--paginate'), reply: fx('reviews.json') },
     { match: (a, input) => input && a.includes('POST') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: { id: 1000 } },
@@ -94,7 +101,7 @@ test('draft appends to my existing pending review through GraphQL', async () => 
   ]));
   const r = await draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: tmpdir() });
   assert.deepEqual(r, { review_id: 901, created: false, recreated: false });
-  const mutation = calls.find((c) => c.args.includes('graphql'));
+  const mutation = calls.find((c) => c.args.includes('graphql') && c.input);
   assert.equal(mutation.input.variables.input.pullRequestReviewId, 'PRR_me');
   assert.equal(mutation.input.variables.input.body, 'New finding.');
   assert.ok(!calls.some((c) => c.args.includes('DELETE')), 'nothing is deleted');
@@ -103,7 +110,7 @@ test('draft appends to my existing pending review through GraphQL', async () => 
 
 test('draft sets the review body on an existing review when one is given', async () => {
   const { gh, calls } = fakeGh(pendingScript([
-    { match: has('graphql'), reply: { data: {} } },
+    { match: has('graphql'), reply: { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_new' } } } } },
     { match: (a) => a.includes('PUT') && a.some((x) => x.endsWith('reviews/901')), reply: {} },
   ]));
   await draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], body: 'New summary.', backupDir: tmpdir() });
@@ -135,6 +142,7 @@ test('the fallback refuses and deletes nothing when one of my comments has no an
   const bad = fx('review-comments.json');
   bad[0][0].line = null; bad[0][0].original_line = null; bad[0][0].position = null;
   const { gh, calls } = fakeGh([
+    noThreads,
     { match: has('api', 'user'), reply: { login: 'me' } },
     { match: has('reviews/901/comments'), reply: bad },
     { match: (a) => a.includes('--paginate'), reply: fx('reviews.json') },
@@ -186,4 +194,97 @@ test('the fallback refuses and deletes nothing when my review is on another comm
   const { gh, calls } = fakeGh(pendingScript([refuseGraphql]));
   await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'def', comments: [newComment], backupDir: tmpdir() }), /moved|move your comments/);
   assert.ok(!calls.some((c) => c.args.includes('DELETE')));
+});
+
+// Live check, 2026-10-02: the pending review's own comments endpoint returns no line, start_line or side.
+test('fetchPending takes line, range and side from the review threads, and marks my draft replies', async () => {
+  const rest = [[...fx('review-comments.json')[0], { id: 5003, node_id: 'PRRC_3', path: 'src/s.js', position: 2, body: 'My draft reply.' }]];
+  const { gh } = fakeGh([
+    threadsQuery(fx('threads-pending.json')),
+    { match: has('api', 'user'), reply: { login: 'me' } },
+    { match: has('pulls/3/reviews/901/comments'), reply: rest.map((page) => page.map((c) => ({ ...c, line: undefined, original_line: undefined, start_line: undefined, side: undefined }))) },
+    { match: has('pulls/3/reviews'), reply: fx('reviews.json') },
+  ]);
+  const p = await fetchPending(gh, { repo: 'octo-org/example', pr: 3 });
+  const by = Object.fromEntries(p.comments.map((c) => [c.id, c]));
+  assert.deepEqual([by[5001].line, by[5001].start_line, by[5001].side, by[5001].start_side, by[5001].in_reply_to], [12, null, 'RIGHT', null, null]);
+  assert.deepEqual([by[5002].line, by[5002].start_line, by[5002].side, by[5002].start_side, by[5002].in_reply_to], [7, 5, 'LEFT', 'LEFT', null]);
+  assert.equal(by[5003].in_reply_to, 41);
+});
+
+test('threads leaves out my pending comments and threads that only hold them', () => {
+  const t = shapeThreads([fx('threads-pending.json')]);
+  assert.deepEqual(t.map((x) => x.thread_id), ['PRRT_s']);
+  assert.deepEqual(t[0].comments.map((c) => c.id), [41]);
+});
+
+test('the fallback recreates a range comment with its range and side, not its position', async () => {
+  const { gh, calls } = fakeGh(pendingScript([
+    refuseGraphql,
+    { match: (a) => a.includes('DELETE'), reply: {} },
+    { match: (a, input) => input && a.includes('POST'), reply: { id: 1003 } },
+  ], threadsQuery(fx('threads-pending.json'))));
+  await draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: mkdtempSync(join(tmpdir(), 'sc-draft-')) });
+  const created = calls.at(-1).input.comments;
+  assert.deepEqual(created[1], { path: 'src/b.js', line: 7, start_line: 5, start_side: 'LEFT', side: 'LEFT', body: 'Extract a helper.' });
+});
+
+test('the fallback refuses and deletes nothing when my pending review holds a reply', async () => {
+  const rest = [[...fx('review-comments.json')[0], { id: 5003, node_id: 'PRRC_3', path: 'src/s.js', position: 2, body: 'My draft reply.' }]];
+  const { gh, calls } = fakeGh([
+    threadsQuery(fx('threads-pending.json')),
+    { match: has('api', 'user'), reply: { login: 'me' } },
+    { match: has('reviews/901/comments'), reply: rest },
+    { match: (a) => a.includes('--paginate'), reply: fx('reviews.json') },
+    refuseGraphql,
+  ]);
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: tmpdir() }), /comment 5003 is a reply/);
+  assert.ok(!calls.some((c) => c.args.includes('DELETE')));
+});
+
+// Live check, 2026-10-02: for a line outside the diff GitHub answers {"thread": null}, with no errors and exit code 0.
+test('draft stops when GitHub adds no thread, says which comment and what was added, and deletes nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sc-draft-'));
+  let n = 0;
+  const { gh, calls } = fakeGh(pendingScript([
+    { match: has('graphql'), reply: () => ({ data: { addPullRequestReviewThread: { thread: n++ === 0 ? { id: 'PRRT_ok' } : null } } }) },
+  ]));
+  const two = [newComment, { path: 'src/c.js', line: 999, body: 'Outside the diff.' }];
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: two, body: 'New summary.', backupDir: dir }), (e) => {
+    assert.match(e.message, /comment 2 \(src\/c\.js:999\)/);
+    assert.match(e.message, /1 comment before it was added to pending review 901/);
+    return true;
+  });
+  assert.ok(!calls.some((c) => c.args.includes('DELETE') || c.args.includes('PUT')));
+  assert.equal(readdirSync(dir).length, 0, 'no backup');
+});
+
+// Live check, 2026-10-02: GitHub answers 422 "Could not edit a review with a missing body" when a pending review has no body yet.
+test('draft recreates a pending review that has no body when a body is given, without appending first', async () => {
+  const reviews = fx('reviews.json');
+  reviews[0][1].body = '';
+  const dir = mkdtempSync(join(tmpdir(), 'sc-draft-'));
+  const { gh, calls } = fakeGh([
+    noThreads,
+    { match: has('api', 'user'), reply: { login: 'me' } },
+    { match: has('pulls/3/reviews/901/comments'), reply: fx('review-comments.json') },
+    { match: (a) => a.includes('--paginate') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: reviews },
+    { match: (a) => a.includes('DELETE'), reply: {} },
+    { match: (a, input) => input && a.includes('POST'), reply: { id: 1004 } },
+  ]);
+  const r = await draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], body: 'New summary.', backupDir: dir });
+  assert.equal(r.recreated, true);
+  assert.ok(!calls.some((c) => c.args.includes('graphql') && c.input), 'no append');
+  assert.equal(calls.at(-1).input.body, 'New summary.');
+  assert.equal(calls.at(-1).input.comments.length, 3);
+});
+
+test('a gh failure carries the reason GitHub gave, not only the HTTP status', () => {
+  const stdout = '{"message":"Validation Failed","errors":[{"resource":"PullRequestReview","code":"custom","field":"user_id","message":"user_id can only have one pending review per pull request"}],"status":"422"}';
+  const e = ghError(['api', '-X', 'POST', 'repos/o/n/pulls/1/comments/5/replies'], new Error('exit 1'), stdout, 'gh: Validation Failed (HTTP 422)\n');
+  assert.match(e.message, /Validation Failed \(HTTP 422\)/);
+  assert.match(e.message, /one pending review per pull request/);
+  const e2 = ghError(['api', '-X', 'PUT', 'x'], new Error('exit 1'), '{"message":"Unprocessable Entity","errors":["Could not edit a review with a missing body."]}', 'gh: Unprocessable Entity (HTTP 422)');
+  assert.match(e2.message, /Could not edit a review with a missing body/);
+  assert.equal(ghError(['pr', 'view'], new Error('exit 1'), 'not json', 'no pull requests found').message, 'gh pr view failed: no pull requests found');
 });
