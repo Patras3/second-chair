@@ -257,7 +257,7 @@ The server is reachable only from the machine it runs on. A server started insid
 
 **The panel shows a red dot ("server off").** The page cannot reach the server. Start a Claude Code session, or run `! second-chair start` in one. `! second-chair doctor` shows why the server is down. In your own terminal, the commands work after `npm install -g` (see [Where the command runs](#where-the-command-runs)). Without a server, **Load from clipboard** in the **⋯** menu reads a payload from the clipboard. **Send decisions** then copies the decisions to the clipboard, and you paste them to the agent.
 
-**Port 7788 is in use.** `second-chair doctor` says when another program holds the port. Set a free port in your shell profile, for example `export SECOND_CHAIR_PORT=7790`. Claude Code and its hook then use it too. Start the server again, then install the userscript again from `http://127.0.0.1:7790/second-chair.user.js`. The server writes its port into the script it serves, so the old script still calls port 7788.
+**Port 7788 is in use.** `second-chair doctor` says when another program holds the port. Set a free port in your shell profile, for example `export SECOND_CHAIR_PORT=7790`. Claude Code and its hook use it too, but only when Claude Code starts from that shell. Start the server again, then install the userscript again from `http://127.0.0.1:7790/second-chair.user.js`. The server writes its port into the script it serves, so the old script still calls port 7788.
 
 **`gh` is not logged in.** Run `gh auth login` in a terminal, then check with `gh auth status`. `second-chair doctor` also reports a `gh` that is older than 2.48.0.
 
@@ -274,7 +274,9 @@ The server is reachable only from the machine it runs on. A server started insid
 1. Stop the server. In Claude Code, run `! second-chair stop`. If you installed the command with npm, `second-chair stop` in a terminal works too.
 2. In Claude Code, remove the plugin: `/plugin uninstall second-chair@second-chair`. Remove the marketplace too, if you like: `/plugin marketplace remove second-chair`.
 3. Remove Second Chair from the script manager's dashboard.
-4. Delete the data directory: `rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/second-chair"`. If you set `SECOND_CHAIR_HOME`, delete that directory instead.
+4. Delete the data directory. If you set `SECOND_CHAIR_HOME`, delete that directory instead.
+   - Linux and macOS: `rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/second-chair"`
+   - Windows, in PowerShell: `Remove-Item -Recurse -Force "$HOME\.local\share\second-chair"`
 5. If you installed the command with npm, run `npm uninstall -g second-chair`. If you set up a service, disable it and delete its file.
 
 ## Development
