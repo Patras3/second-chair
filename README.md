@@ -10,8 +10,8 @@ texts in a second round.
 
 | Part | What it does |
 |:--|:--|
-| `second-chair.user.js` | The userscript: cards under every thread, a side panel, decisions |
-| `server.mjs` | Local server on `127.0.0.1:7788`: stores proposals and decisions, serves the userscript |
+| `userscript/second-chair.user.js` | The userscript: cards under every thread, a side panel, decisions |
+| `lib/server.mjs` | Local server on `127.0.0.1:7788`: stores proposals and decisions, serves the userscript |
 | `bin/second-chair` | CLI for the agent: `serve`, `push`, `wait`, `get`, `close`, `status` |
 | `build_payload.py` | Wraps proposal arrays into a payload |
 
@@ -19,12 +19,11 @@ No dependencies. The server and the CLI need Node 22 or newer.
 
 ## Set up
 
-1. Start the server, either as a systemd user service (`./install-service.sh`) or by hand
-   (`bin/second-chair serve`).
+1. Start the server (`bin/second-chair serve`); keep it running while you work.
 2. Open `http://127.0.0.1:7788/second-chair.user.js` in the browser. Tampermonkey offers to install
    the script. Updates come from the same URL.
 
-The server listens on `127.0.0.1` only. Every `/api` call needs the `X-PR-Triage: 1` header, and
+The server listens on `127.0.0.1` only. Every `/api` call needs the `X-Second-Chair: 1` header, and
 the `Host` header must name the server. A web page cannot forge either, so other sites cannot
 write proposals or decisions.
 
@@ -123,7 +122,7 @@ Round 2 verdicts are `publish`, `hold` or `manual`. In review mode they are `pos
 `marked` and `DOMPurify` from jsDelivr through `@require`; without them it shows plain text.
 
 The server stores files under `~/.local/share/second-chair/<owner>/<name>/<pr>/` (override with
-`PR_TRIAGE_HOME`). Pushing new proposals for a round deletes that round's decisions, because they
+`SECOND_CHAIR_HOME`). Pushing new proposals for a round deletes that round's decisions, because they
 answer proposals that are gone.
 
 ## Test
