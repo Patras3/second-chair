@@ -28,6 +28,7 @@
    the bottom runs only in a browser. */
 
 const SC_TOOL = 'second-chair';
+const SC_FINAL_ROUND = 2;
 const SC_SERVER = 'http://127.0.0.1:7788';
 
 // Decision buttons per mode and round. `reply` answers the threads on your own pull request; `review`

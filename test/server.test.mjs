@@ -125,3 +125,9 @@ test('review mode takes its own decisions, and Revise needs a note', async () =>
   const ok = await call('POST', '/api/decisions', decisions({ pr: 20, decisions: [{ thread_id: 'C1', decision: 'revise', note: 'shorter' }, { thread_id: 'BODY', decision: 'drop' }] }));
   assert.equal(ok.status, 200);
 });
+
+test('the served userscript points at the port the server runs on', async () => {
+  const text = await (await fetch(`${base}/second-chair.user.js`)).text();
+  assert.ok(text.includes(`// @updateURL    http://127.0.0.1:${port}/second-chair.user.js`));
+  assert.ok(text.includes(`'http://127.0.0.1:${port}'`));
+});
