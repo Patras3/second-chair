@@ -156,6 +156,7 @@ The server refuses decisions with `409` when:
 
 - `tool` or `kind` is wrong;
 - there are no proposals for that pull request and round;
+- `repo` has a `.` or `..` part, or `pr` or `round` is not a whole number of 1 or more;
 - `repo`, `pr` or `round` do not match the proposals;
 - `head` differs from the proposals' `head`;
 - a `thread_id` is not in the proposals;
@@ -171,6 +172,7 @@ The server listens on `http://127.0.0.1:7788`. `SECOND_CHAIR_PORT` or `serve --p
 
 Rules for every request:
 
+- A `repo` is `owner/name`, and neither part may be `.` or `..`.
 - The `Host` header must be `127.0.0.1:<port>` or `localhost:<port>`. Otherwise the answer is `403`.
 - Every route under `/api/` needs the header `X-Second-Chair: 1`. Otherwise the answer is `403`.
 - A body is JSON, at most 5 MB. A larger body gets `413`, and a body that is not JSON gets `400`.
@@ -181,7 +183,7 @@ Rules for every request:
 |:--|:--|:--|
 | `GET /health` | | `200 {"ok": true, "tool": "second-chair", "pid": N}`, where `pid` is the server's process id. `stop` signals a process only when this `pid` matches its pid file. Needs no `X-Second-Chair` header. |
 | `GET /second-chair.user.js` | | `200` with the userscript, with the server's port written into it. Needs no `X-Second-Chair` header. |
-| `GET /api/proposals` | `?repo=O/N&pr=N[&round=R]` | `200` with the payload, `400` without a valid `repo` and `pr`, `404` when there is none. Without `round`: the most recently pushed round, so a new round 1 wins over an older round 2. |
+| `GET /api/proposals` | `?repo=O/N&pr=N[&round=R]` | `200` with the payload, `400` without a valid `repo` and `pr` or with a `round` that is not a whole number of 1 or more, `404` when there is none. Without `round`: the most recently pushed round, so a new round 1 wins over an older round 2. |
 | `PUT /api/proposals` | a proposals payload | `200 {"ok": true, "published_at": "…"}`, or `400` with the reason. It replaces that round's proposals and deletes that round's decisions. |
 | `GET /api/decisions` | `?repo=O/N&pr=N&round=R` | `200` with the decisions, `400` without `repo`, `pr` and `round`, `404` when there are none yet. |
 | `POST /api/decisions` | a decisions payload | `200 {"ok": true}`, or `409` with the reason (see above). |

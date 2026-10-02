@@ -202,7 +202,7 @@ test('put-decisions hands pasted decisions to the server, and shows why the serv
     const file = join(root, 'decisions.json');
     await writeFile(file, JSON.stringify(decisions, null, 2));
     const ok = await run(process.execPath, [BIN, 'put-decisions', file], { env });
-    assert.match(ok.stdout, /saved 1 decisions for octo-org\/example#5 round 2/);
+    assert.match(ok.stdout, /saved 1 decision for octo-org\/example#5 round 2/);
     const got = await run(process.execPath, [BIN, 'get', '--repo', 'octo-org/example', '--pr', '5', '--round', '2'], { env });
     assert.equal(JSON.parse(got.stdout).decisions[0].reply_en, 'Done in `abc`.');
 

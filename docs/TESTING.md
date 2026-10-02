@@ -78,6 +78,7 @@ Use a pull request by another account.
 - [ ] Round 1: **Revise** one comment with a note, **Drop** one, **Post** the hand-written one. Send.
 - [ ] Round 2: the revised text follows the note. Send with **Post** on the two that are left.
 - [ ] After `publish`, the pending review on GitHub holds the two comments with the approved texts, and the dropped one is gone. The review is still pending.
+- [ ] With no pending review on the pull request, `second-chair draft <PR> --body-file body.md` with no comments file creates a pending review. `second-chair pending <PR>` shows it with that body and no comments.
 
 ### Cards after the end
 
@@ -85,6 +86,10 @@ Use a pull request by another account.
 - [ ] After a reload, the cards stay hidden.
 - [ ] Stop the server (`second-chair stop`) and reload. The cards stay hidden.
 - [ ] **Show cards on the page** brings them back, read only.
+
+### Server
+
+- [ ] Write the pid of another running process into `server.pid` in the data directory, with the server running. `second-chair stop` says the server is not the one `start` launched. Both processes keep running.
 
 ### Other systems
 
