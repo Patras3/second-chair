@@ -1,0 +1,12 @@
+{
+  "name": "pr-triage",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "bin": { "pr-triage": "bin/pr-triage" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node test/dom-smoke.cjs"
+  }
+}
