@@ -79,6 +79,8 @@ const pendingScript = (extra, threads = noThreads) => [
   ...extra,
 ];
 const newComment = { path: 'src/c.js', line: 8, body: 'New finding.' };
+// What gh gives for a GraphQL `errors` answer: ghError tags it, and only such a refusal may start a rebuild.
+const gqlError = (msg) => Object.assign(new Error(`gh api graphql failed: ${msg}`), { graphql: true });
 
 test('draft creates a pending review when I have none, with no event field', async () => {
   const { gh, calls } = fakeGh([
@@ -121,7 +123,7 @@ test('draft sets the review body on an existing review when one is given', async
 test('when GraphQL refuses, draft saves my comments, then recreates the review with mine and the new ones', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sc-draft-'));
   const { gh, calls } = fakeGh(pendingScript([
-    { match: has('graphql'), reply: () => { throw new Error('gh api graphql failed: not supported'); } },
+    { match: has('graphql'), reply: () => { throw gqlError('not supported'); } },
     { match: (a) => a.includes('DELETE') && a.some((x) => x.endsWith('reviews/901')), reply: () => { assert.equal(readdirSync(dir).length, 1, 'backup exists before the delete'); return {}; } },
     { match: (a, input) => input && a.includes('POST'), reply: { id: 1001 } },
   ]));
@@ -146,13 +148,13 @@ test('the fallback refuses and deletes nothing when one of my comments has no an
     { match: has('api', 'user'), reply: { login: 'me' } },
     { match: has('reviews/901/comments'), reply: bad },
     { match: (a) => a.includes('--paginate'), reply: fx('reviews.json') },
-    { match: has('graphql'), reply: () => { throw new Error('nope'); } },
+    { match: has('graphql'), reply: () => { throw gqlError('nope'); } },
   ]);
   await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: tmpdir() }), /comment 5001 has no line/);
   assert.ok(!calls.some((c) => c.args.includes('DELETE')));
 });
 
-const refuseGraphql = { match: has('graphql'), reply: () => { throw new Error('not supported'); } };
+const refuseGraphql = { match: has('graphql'), reply: () => { throw gqlError('not supported'); } };
 
 test('when the recreate fails, draft restores my own comments and names the backup', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sc-draft-'));
@@ -193,7 +195,7 @@ test('draft refuses a bad new comment before any gh call', async () => {
 test('when a guard stops the fallback after some new comments were appended, it says which, not that nothing changed', async () => {
   let n = 0;
   const { gh, calls } = fakeGh(pendingScript([
-    { match: has('graphql'), reply: () => { if (n++ === 0) return { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_ok' } } } }; throw new Error('not supported'); } },
+    { match: has('graphql'), reply: () => { if (n++ === 0) return { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_ok' } } } }; throw gqlError('not supported'); } },
   ]));
   const three = [newComment, { path: 'src/c.js', line: 9, body: 'Second.' }, { path: 'src/c.js', line: 10, body: 'Third.' }];
   await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'def', comments: three, backupDir: tmpdir() }), (e) => {
@@ -303,4 +305,53 @@ test('a gh failure carries the reason GitHub gave, not only the HTTP status', ()
   const e2 = ghError(['api', '-X', 'PUT', 'x'], new Error('exit 1'), '{"message":"Unprocessable Entity","errors":["Could not edit a review with a missing body."]}', 'gh: Unprocessable Entity (HTTP 422)');
   assert.match(e2.message, /Could not edit a review with a missing body/);
   assert.equal(ghError(['pr', 'view'], new Error('exit 1'), 'not json', 'no pull requests found').message, 'gh pr view failed: no pull requests found');
+});
+
+test('only a GraphQL errors answer is tagged as a GraphQL refusal', () => {
+  const gql = ghError(['api', 'graphql', '--input', '-'], new Error('exit 1'), '{"data":null,"errors":[{"type":"FORBIDDEN","message":"not allowed"}]}', 'gh: not allowed\n');
+  assert.equal(gql.graphql, true);
+  assert.equal(ghError(['api', 'graphql', '--input', '-'], new Error('exit 1'), '', 'error connecting to api.github.com').graphql, undefined, 'a network error');
+  assert.equal(ghError(['api', 'graphql', '--input', '-'], new Error('exit 1'), '{"message":"Bad credentials"}', 'gh: Bad credentials (HTTP 401)').graphql, undefined, 'an auth error');
+  assert.equal(ghError(['api', '-X', 'PUT', 'x'], new Error('exit 1'), '{"message":"Validation Failed","errors":["nope"]}', 'gh: (HTTP 422)').graphql, undefined, 'a REST error');
+});
+
+test('a network or auth failure while appending stops draft without deleting anything', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sc-draft-'));
+  for (const fail of [new Error('gh api graphql failed: error connecting to api.github.com'), new Error('gh api graphql failed: gh: Bad credentials (HTTP 401)')]) {
+    const { gh, calls } = fakeGh(pendingScript([{ match: has('graphql'), reply: () => { throw fail; } }]));
+    await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: dir }), (e) => {
+      assert.ok(e.message.includes(fail.message));
+      assert.match(e.message, /Nothing was changed/);
+      return true;
+    });
+    assert.ok(!calls.some((c) => c.args.includes('DELETE')), 'nothing is deleted');
+  }
+  assert.equal(readdirSync(dir).length, 0, 'no backup');
+});
+
+test('a failed body update after the appends says what was added and deletes nothing', async () => {
+  const { gh, calls } = fakeGh(pendingScript([
+    { match: has('graphql'), reply: { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_new' } } } } },
+    { match: (a) => a.includes('PUT'), reply: () => { throw new Error('gh api -X PUT failed: gh: Validation Failed (HTTP 422)'); } },
+  ]));
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], body: 'New summary.', backupDir: tmpdir() }), (e) => {
+    assert.match(e.message, /HTTP 422/);
+    assert.match(e.message, /1 of the new comments was already added to pending review 901.*The body was not set/);
+    return true;
+  });
+  assert.ok(!calls.some((c) => c.args.includes('DELETE')));
+});
+
+test('the fallback refuses and deletes nothing when GitHub does not say which commit my review is on', async () => {
+  const reviews = fx('reviews.json');
+  reviews[0][1].commit_id = null;
+  const { gh, calls } = fakeGh([
+    noThreads,
+    { match: has('api', 'user'), reply: { login: 'me' } },
+    { match: has('pulls/3/reviews/901/comments'), reply: fx('review-comments.json') },
+    { match: (a) => a.includes('--paginate') && a.some((x) => x.endsWith('pulls/3/reviews')), reply: reviews },
+    refuseGraphql,
+  ]);
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment], backupDir: tmpdir() }), /which commit/);
+  assert.ok(!calls.some((c) => c.args.includes('DELETE')));
 });
