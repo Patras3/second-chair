@@ -163,7 +163,7 @@ The server refuses decisions with `409` when:
 - a `revise` decision has an empty note;
 - an item has no decision.
 
-When the server is not running, the page copies the decisions to the clipboard instead. The user pastes them to the agent.
+When the server is not running, the page copies the decisions to the clipboard instead. The user pastes them to the agent. The agent saves them to a file and runs `second-chair put-decisions <file>` once the server runs. The server checks them as above, and the work goes on as if the page had sent them.
 
 ## Server API
 
