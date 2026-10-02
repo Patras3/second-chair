@@ -237,7 +237,7 @@ For a review of someone else's pull request.
 
 `publish` refuses to run when round 2 has no decisions. It prints what it did, item by item. A second run skips what is already recorded, so a failure halfway can be retried.
 
-Its summary line counts the real changes on GitHub. A comment that already had the approved text counts as kept. An approved comment that is no longer in the pending review gets a line that starts with `WARNING`. It is not recorded, so the next run looks for it again.
+Its summary line counts the real changes on GitHub. A comment or a review body that already had the approved text counts as kept, and `publish` sends nothing for it. An empty body that the user dropped is such a case. An approved comment that is no longer in the pending review gets a line that starts with `WARNING`. It is not recorded, so the next run looks for it again.
 
 ## Command formats
 

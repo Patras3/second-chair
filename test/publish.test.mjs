@@ -192,6 +192,21 @@ test('an explicit drop of the review body still clears it', async () => {
   assert.equal(calls.find((c) => c.args.includes('PUT')).input.body, '');
 });
 
+// Release run, 2026-10-02: a drop of an empty body sent nothing to GitHub, but the summary said "published 3".
+test('a body that already has the approved text counts as kept and sends nothing', async () => {
+  for (const [decision, text, reviewBody] of [['drop', undefined, ''], ['post', 'Overall fine.', 'Overall fine.']]) {
+    const decisions = reviewDecisions();
+    Object.assign(decisions.decisions[0], { decision, reply_en: text });
+    const srv = fakeServer({ proposals: reviewRound2, decisions });
+    const { gh, calls } = reviewGh([], reviewBody);
+    const r = await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
+    assert.ok(!calls.some((c) => c.args.includes('PUT')), `${decision}: no PUT`);
+    assert.deepEqual(r.done, ['C1', 'C2'], decision);
+    assert.deepEqual(r.kept, ['BODY'], decision);
+    assert.equal(srv.published.BODY.action, 'kept', decision);
+  }
+});
+
 test('the target comment comes from the proposals, not from the decision', async () => {
   const wrong = { ...replyDecisions, decisions: [{ thread_id: 'T1', comment_id: 999, decision: 'publish', reply_en: 'ok' }] };
   const srv = fakeServer({ proposals: replyRound2, decisions: wrong });
