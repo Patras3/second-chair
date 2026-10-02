@@ -144,3 +144,51 @@ test('review mode fails clearly when the pending review is gone', async () => {
   ]);
   await assert.rejects(publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /no pending review/);
 });
+
+test('--submit in reply mode is refused before any gh call', async () => {
+  const srv = fakeServer({ proposals: replyRound2, decisions: replyDecisions });
+  const { gh, calls } = fakeGh([]);
+  await assert.rejects(publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, submit: 'COMMENT', log: () => {} }), /only applies to review mode/);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(srv.published, {});
+});
+
+test('review mode refuses an empty approved text for a comment and for the body', async () => {
+  for (const [thread, other] of [['C1', 'BODY'], ['BODY', 'C1']]) {
+    const decisions = reviewDecisions();
+    const bad = decisions.decisions.find((x) => x.thread_id === thread);
+    delete bad.reply_en;
+    const srv = fakeServer({ proposals: reviewRound2, decisions });
+    const { gh, calls } = reviewGh();
+    await assert.rejects(publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /approved text is empty/, other);
+    assert.ok(!calls.some((c) => c.input && Object.keys(c.input).length === 0), 'no empty payload sent');
+    assert.ok(!(thread in srv.published));
+  }
+});
+
+test('an explicit drop of the review body still clears it', async () => {
+  const decisions = reviewDecisions();
+  Object.assign(decisions.decisions[0], { decision: 'drop', reply_en: undefined });
+  const srv = fakeServer({ proposals: reviewRound2, decisions });
+  const { gh, calls } = reviewGh();
+  await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
+  assert.equal(calls.find((c) => c.args.includes('PUT')).input.body, '');
+});
+
+test('the target comment comes from the proposals, not from the decision', async () => {
+  const wrong = { ...replyDecisions, decisions: [{ thread_id: 'T1', comment_id: 999, decision: 'publish', reply_en: 'ok' }] };
+  const srv = fakeServer({ proposals: replyRound2, decisions: wrong });
+  const { gh, calls } = fakeGh([{ match: has('comments/11/replies'), reply: { html_url: 'r11' } }]);
+  await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].args.some((a) => a.includes('/comments/11/replies')));
+
+  const rev = reviewDecisions();
+  rev.decisions[1].comment_id = 5002;
+  rev.decisions[2].comment_id = 5001;
+  const srv2 = fakeServer({ proposals: reviewRound2, decisions: rev });
+  const g2 = reviewGh();
+  await publish({ gh: g2.gh, api: srv2.api, repo: 'octo-org/example', pr: 3, log: () => {} });
+  assert.ok(g2.calls.find((c) => c.args.includes('PATCH')).args.some((a) => a.endsWith('comments/5001')));
+  assert.ok(g2.calls.find((c) => c.args.includes('DELETE')).args.some((a) => a.endsWith('comments/5002')));
+});
