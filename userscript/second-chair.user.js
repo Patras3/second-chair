@@ -61,8 +61,6 @@ const SC_DECISIONS = {
   },
 };
 
-const SC_VERDICT_LABEL = { reply: 'reply', fix: 'fix', pushback: 'push back', manual: 'manual', publish: 'publish', hold: 'hold', post: 'post', revise: 'revise', drop: 'drop' };
-
 function modeOf(payload) {
   return payload?.mode ?? 'reply';
 }
@@ -151,7 +149,8 @@ function stateFor(payload, previous) {
   const samePublication = sameRound && (previous.payload.published_at ?? null) === (payload.published_at ?? null);
   const sentAt = samePublication ? previous.sentAt ?? null : null;
   const doneAt = samePublication ? previous.doneAt ?? null : null;
-  return { payload, decisions, sentAt, doneAt };
+  const sentVia = samePublication && sentAt ? previous.sentVia ?? null : null;
+  return { payload, decisions, sentAt, sentVia, doneAt };
 }
 
 /** Why and since when this pull request's triage is over, or null while it is open. */
@@ -170,7 +169,15 @@ function formatTime(iso) {
   return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString();
 }
 
-const SC_DONE_REASON = { closed: 'closed by the agent', 'final-sent': 'final round sent', marked: 'marked as done' };
+const SC_DONE_REASON = { closed: 'closed', 'final-sent': 'final round sent', marked: 'marked as done' };
+
+/** The banner text for a round that was sent; it names the server only when the server took the decisions. */
+function sentNote(state) {
+  const when = `Decisions sent ${formatTime(state.sentAt)}.`;
+  if (state.sentVia === 'server') return `${when} The agent picks them up from the server; the next round loads here.`;
+  if (state.sentVia === 'clipboard') return `${when} They are on the clipboard. Paste them to the agent; the next round loads here.`;
+  return when;
+}
 
 /** True when the server holds a payload this state has not loaded: a later round, another head, a re-publish or a close. */
 function isNewer(serverPayload, state) {
@@ -312,12 +319,12 @@ function buildCard(state, item, where, view = {}) {
     ? `<a href="#" data-sc-act="prev" data-sc-id="${id}">‹</a><a href="#" data-sc-act="next" data-sc-id="${id}">›</a>`
     : '';
   const hidden = view.hidden ? '<span class="sc-label" title="GitHub has not loaded this thread on the page">hidden</span>' : '';
-  const cls = `sc-card${e.decision ? ' sc-decided' : ''}${compact ? ' sc-compact' : ''}`;
+  const cls = `sc-card${e.decision && !missingNote(state, item) ? ' sc-decided' : ''}${compact ? ' sc-compact' : ''}`;
   const open = `<div class="${cls}" data-sc-card="${id}" data-sc-where="${where}">`;
   const mark = '<span class="sc-mark" aria-hidden="true">SC</span>';
   if (compact) {
     const first = String(d.reply || field(item, 'summary')).split('\n').find((l) => l.trim()) ?? '';
-    const label = e.decision ? `<span class="sc-label sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(p, e.decision))}</span>` : '';
+    const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(p, e.decision))}</span>` : '';
     return `${open}<div class="sc-oneline">${mark}${label}<span class="sc-oneline-text">${richText(first)}</span><a href="#" data-sc-act="expand" data-sc-id="${id}">expand</a></div></div>`;
   }
   const context = [field(item, 'context'), field(item, 'fix') ? `**Plan:** ${field(item, 'fix')}` : ''].filter(Boolean).join('\n\n');
@@ -344,7 +351,7 @@ function buildCard(state, item, where, view = {}) {
   return `${open}
   <div class="sc-card-head">${mark}${who}${verdictLabel}${hidden}<span class="sc-head-right">${pos}${moves}${jump}${expander}</span></div>
   <div class="sc-card-body">
-    ${summary ? `<div class="sc-summary">${renderMarkdown(summary)}</div>` : ''}
+    ${summary ? `<div class="sc-summary sc-md">${renderMarkdown(summary)}</div>` : ''}
     ${context ? `<div class="sc-foryou"><div class="sc-foryou-title">For you <span class="sc-muted">· never posted</span></div><div class="sc-md markdown-body">${renderMarkdown(context)}</div></div>` : ''}
     ${commits}
     <div class="sc-caption">${review ? (item.comment_id ? 'Comment to post' : 'Review body') : 'Reply to post'}${d.replyEdited ? ' <span class="sc-edited">· edited</span>' : ''}</div>
@@ -355,69 +362,95 @@ function buildCard(state, item, where, view = {}) {
 </div>`;
 }
 
+/** Panel rows grouped by file: general items first under "General", then each path in first-seen order. */
+function groupItems(items) {
+  const groups = new Map();
+  const general = items.filter((it) => !it.path);
+  if (general.length) groups.set('', { key: '', label: 'General', items: general });
+  for (const it of items) {
+    if (!it.path) continue;
+    if (!groups.has(it.path)) groups.set(it.path, { key: it.path, label: it.path, items: [] });
+    groups.get(it.path).items.push(it);
+  }
+  return [...groups.values()];
+}
+
+const SC_ICON = {
+  // SVG presentation attributes do not take var(), so the theme colors go through style.
+  open: '<svg class="sc-st" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" style="fill:none;stroke:var(--fgColor-attention,#9a6700);stroke-width:1.5"/></svg>',
+  done: (color) => `<svg class="sc-st" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" style="fill:${color}"/><path d="M5 8.2l2 2 4-4.2" style="stroke:#fff;stroke-width:1.6;fill:none"/></svg>`,
+};
+
 function buildPanelList(state, openId, filterKey, viewOf) {
   const p = state.payload;
-  return visibleItems(state, filterKey).map((it) => {
+  const items = visibleItems(state, filterKey);
+  return groupItems(items).map((g) => `<div class="sc-group"><span>${esc(g.label)}</span><span>${g.items.length}</span></div>${g.items.map((it) => {
     const e = effective(state, it);
     const v = viewOf(it);
-    const label = e.decision ? `${e.auto ? 'auto: ' : ''}${decisionLabel(p, e.decision)}${missingNote(state, it) ? ' (needs a note)' : ''}` : '—';
+    const needNote = missingNote(state, it);
+    const decided = Boolean(e.decision) && !needNote;
+    const icon = v.done ? SC_ICON.done('var(--fgColor-done,#8250df)') : !decided ? SC_ICON.open : SC_ICON.done(e.auto ? 'var(--fgColor-muted,#8c959f)' : 'var(--fgColor-success,#1a7f37)');
+    const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(p, e.decision))}${needNote ? ' · needs a note' : ''}</span>` : '<span class="sc-muted">—</span>';
+    const meta = [esc(it.author ?? 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', v.hidden ? '<span class="sc-hidden">not loaded on page</span>' : '', Array.isArray(it.commits) && it.commits.length ? `commit <code>${esc(it.commits[0])}</code>` : ''].filter(Boolean).join(' · ');
     const open = it.thread_id === openId;
-    return `<div class="sc-item${e.decision ? ' sc-decided' : ''}${e.auto ? ' sc-is-auto' : ''}${open ? ' sc-open' : ''}" data-sc-item="${esc(it.thread_id)}">
-  <div class="sc-item-head" data-sc-act="toggle" data-sc-id="${esc(it.thread_id)}">
-    <span class="sc-dot"></span><span class="sc-author">${esc(it.author ?? 'general')}</span>
-    <code class="sc-path">${esc(shortPath(it.path, it.line))}</code>
-    ${v.hidden ? '<span class="sc-badge sc-hidden">hidden</span>' : ''}
-    <span class="sc-item-dec">${esc(label)}</span>
-    <div class="sc-item-sum">${esc(field(it, 'summary'))}</div>
-  </div>
-  ${open ? buildCard(state, it, 'panel', { ...v, expanded: true }) : ''}
+    return `<div class="sc-row${decided ? ' sc-decided' : ''}${open ? ' sc-selected' : ''}" data-sc-item="${esc(it.thread_id)}">
+  <div class="sc-row-main" data-sc-act="toggle" data-sc-id="${esc(it.thread_id)}">${icon}<div class="sc-row-text"><div class="sc-row-sum">${esc(field(it, 'summary') || String(it.reply_en ?? '').split('\n')[0])}</div><div class="sc-row-meta">${meta}</div></div>${label}</div>
+  ${open && (v.expandedInPanel || v.hidden || !it.comment_id) ? buildCard(state, it, 'panel', { ...v, expanded: true }) : ''}
 </div>`;
-  }).join('');
+  }).join('')}`).join('');
 }
 
 function buildFilterBar(state, filterKey) {
-  return filtersFor(state.payload).map((f) => {
-    const n = state.payload.items.filter((it) => f.test(effective(state, it))).length;
-    if (n === 0 && f.key !== 'all' && f.key !== filterKey) return '';
-    return `<button type="button" class="sc-chip${f.key === filterKey ? ' sc-chip-on' : ''}" data-sc-act="filter" data-sc-val="${f.key}">${esc(f.label)} <b>${n}</b></button>`;
-  }).join('');
+  const count = (test) => state.payload.items.filter((it) => test(effective(state, it))).length;
+  const tabs = SC_FILTERS.map((f) => `<a href="#" class="sc-ftab${f.key === filterKey ? ' sc-ftab-on' : ''}" data-sc-act="filter" data-sc-val="${f.key}">${esc(f.label)}<b>${count(f.test)}</b></a>`).join('');
+  const options = decisionsFor(state.payload).map((b) => `<option value="d:${b.key}"${`d:${b.key}` === filterKey ? ' selected' : ''}>${esc(b.label)} (${count((e) => e.decision === b.key)})</option>`).join('');
+  return `<div class="sc-tabbar">${tabs}<select class="sc-fdecision" data-sc-act="filterselect"><option value="">Decision</option>${options}</select></div>`;
 }
 
 const SC_CSS = `
-.sc-toggle{position:fixed;right:16px;bottom:16px;z-index:9999;padding:8px 14px;border-radius:20px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);font:600 13px/1.2 -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-.sc-toggle.sc-complete{border-color:var(--fgColor-success,#1a7f37);color:var(--fgColor-success,#1a7f37)}
-.sc-panel{position:fixed;top:0;right:0;bottom:0;width:min(520px,92vw);z-index:9998;display:flex;flex-direction:column;background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);border-left:1px solid var(--borderColor-default,#d0d7de);box-shadow:-4px 0 16px rgba(0,0,0,.15);font:13px/1.55 -apple-system,system-ui,sans-serif}
-.sc-panel.sc-wide{width:50vw}
-.sc-panel[hidden]{display:none}
-html.sc-shift-narrow body{margin-right:min(520px,92vw)!important}
-html.sc-shift-wide body{margin-right:50vw!important}
-.sc-bar{padding:8px 12px;border-bottom:1px solid var(--borderColor-default,#d0d7de);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.sc-bar .sc-title{font-weight:600;margin-right:auto}
-.sc-server{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor}
-.sc-server.sc-up{color:var(--fgColor-success,#1a7f37)}
-.sc-server.sc-down{color:var(--fgColor-muted,#59636e)}
-.sc-bar button,.sc-chip{padding:3px 10px;border-radius:6px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-muted,#f6f8fa);color:inherit;font:inherit;cursor:pointer}
-.sc-bar button:disabled{opacity:.45;cursor:not-allowed}
-.sc-chip{border-radius:12px;font-size:12px;padding:1px 9px}
-.sc-chip b{font-weight:600;margin-left:2px}
-.sc-chip.sc-chip-on{background:var(--fgColor-accent,#0969da);border-color:var(--fgColor-accent,#0969da);color:#fff}
-.sc-nav{font-size:12px;color:var(--fgColor-muted,#59636e)}
-.sc-nav button{font-size:14px;padding:0 10px}
-.sc-list{overflow:auto;flex:1;padding:8px 10px 60px}
-.sc-msg{padding:8px 12px;font-size:12px;border-bottom:1px solid var(--borderColor-default,#d0d7de)}
-.sc-msg.sc-err{color:var(--fgColor-danger,#d1242f)}
-.sc-banner{padding:8px 12px;border-bottom:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-success-muted,#dafbe1)}
-.sc-banner-done{background:var(--bgColor-done-muted,#fbefff)}
-.sc-paste{margin:8px 12px;width:calc(100% - 24px);min-height:90px;font:12px ui-monospace,monospace}
-.sc-item{border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;margin-bottom:6px}
-.sc-item-head{padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.sc-item-sum{flex-basis:100%;color:var(--fgColor-muted,#59636e);font-size:12px}
-.sc-item-dec{margin-left:auto;font-size:12px;font-weight:600}
-.sc-dot{width:8px;height:8px;border-radius:50%;background:var(--fgColor-attention,#9a6700)}
-.sc-decided .sc-dot{background:var(--fgColor-success,#1a7f37)}
-.sc-is-auto .sc-dot{background:var(--fgColor-muted,#8c959f)}
-.sc-item.sc-open{border-color:var(--fgColor-accent,#0969da);box-shadow:0 0 0 1px var(--fgColor-accent,#0969da)}
-.sc-card{--sc-accent:var(--fgColor-accent,#0969da);--sc-border:var(--borderColor-default,#d0d7de);--sc-subtle:var(--bgColor-muted,#f6f8fa);--sc-canvas:var(--bgColor-default,#fff);--sc-muted:var(--fgColor-muted,#59636e);--sc-success:var(--fgColor-success,#1a7f37);
+.sc-toggle{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;align-items:center;gap:6px;height:32px;padding:0 12px 0 6px;border-radius:16px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);font:600 12px/1 -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:var(--shadow-floating-small,0 2px 8px rgba(0,0,0,.15))}
+.sc-toggle.sc-complete{color:var(--fgColor-success,#1a7f37);border-color:var(--fgColor-success,#1a7f37)}
+.sc-panel{position:fixed;top:0;right:0;bottom:0;width:min(440px,92vw);z-index:9998;display:flex;flex-direction:column;background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);border-left:1px solid var(--borderColor-default,#d0d7de);box-shadow:var(--shadow-floating-large,-4px 0 16px rgba(0,0,0,.12));font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+.sc-panel.sc-wide{width:50vw}.sc-panel[hidden]{display:none}
+html.sc-shift-narrow body{margin-right:min(440px,92vw)!important}html.sc-shift-wide body{margin-right:50vw!important}
+html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift-wide .sc-toggle{right:calc(50vw + 16px)}
+.sc-panel-head{padding:12px 14px 10px;border-bottom:1px solid var(--borderColor-default,#d0d7de);position:relative}
+.sc-hrow{display:flex;align-items:center;gap:8px}.sc-grow{flex:1}.sc-small{font-size:12px;margin-top:6px}.sc-fg{color:var(--fgColor-default,#1f2328)}
+.sc-title{font-size:14px}
+.sc-icon{width:28px;height:28px;border-radius:6px;border:1px solid transparent;background:none;color:var(--fgColor-muted,#59636e);cursor:pointer;font:16px/1 system-ui}
+.sc-icon:hover{background:var(--bgColor-muted,#f6f8fa);border-color:var(--borderColor-default,#d0d7de)}
+.sc-dot{width:8px;height:8px;border-radius:50%;background:var(--fgColor-muted,#8c959f)}.sc-dot.sc-up{background:var(--fgColor-success,#1a7f37)}.sc-dot.sc-down{background:var(--fgColor-danger,#d1242f)}
+.sc-progress{display:flex;height:8px;margin-top:10px;border-radius:4px;overflow:hidden;background:var(--bgColor-muted,#f6f8fa);border:1px solid var(--borderColor-default,#d0d7de)}
+.sc-progress i{display:block}.sc-p-mine{background:var(--fgColor-success,#1a7f37)}.sc-p-auto{background:var(--fgColor-muted,#8c959f)}
+.sc-done-label{color:var(--fgColor-done,#8250df);border-color:var(--fgColor-done,#8250df);background:var(--bgColor-done-muted,#fbefff)}
+.sc-menu{position:absolute;right:14px;top:48px;z-index:2;width:220px;padding:6px 0;background:var(--overlay-bgColor,var(--bgColor-default,#fff));border:1px solid var(--borderColor-default,#d0d7de);border-radius:8px;box-shadow:var(--shadow-floating-medium,0 8px 24px rgba(140,149,159,.3))}
+.sc-menu a{display:block;padding:6px 14px;color:inherit!important;text-decoration:none!important}.sc-menu a:hover{background:var(--bgColor-muted,#f6f8fa)}.sc-menu hr{border:0;border-top:1px solid var(--borderColor-default,#d0d7de);margin:6px 0}.sc-menu .sc-danger{color:var(--fgColor-danger,#d1242f)!important}
+.sc-tabbar{display:flex;align-items:center;gap:2px;padding:0 10px;border-bottom:1px solid var(--borderColor-default,#d0d7de);overflow-x:auto}
+.sc-ftab{padding:8px;border-bottom:2px solid transparent;margin-bottom:-1px;color:inherit!important;text-decoration:none!important;white-space:nowrap}
+.sc-ftab-on{border-bottom-color:var(--underlineNav-borderColor-active,#fd8c73);font-weight:600}
+.sc-ftab b{font-weight:500;font-size:12px;margin-left:4px;padding:0 6px;border-radius:2em;background:var(--bgColor-neutral-muted,#afb8c133)}
+.sc-fdecision{margin-left:auto;font:12px system-ui;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-muted,#f6f8fa);color:inherit;padding:2px 6px}
+.sc-list{flex:1;overflow:auto}
+.sc-group{display:flex;justify-content:space-between;padding:6px 14px;background:var(--bgColor-muted,#f6f8fa);border-bottom:1px solid var(--borderColor-default,#d0d7de);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fgColor-muted,#59636e)}
+.sc-row{border-bottom:1px solid var(--borderColor-default,#d0d7de)}
+.sc-row-main{display:flex;gap:10px;align-items:flex-start;padding:9px 14px;cursor:pointer}
+.sc-row-main:hover{background:var(--bgColor-muted,#f6f8fa)}
+.sc-row.sc-selected>.sc-row-main{background:var(--bgColor-accent-muted,#ddf4ff);box-shadow:inset 3px 0 0 var(--fgColor-accent,#0969da)}
+.sc-st{width:16px;height:16px;flex:none;margin-top:2px}
+.sc-row-text{flex:1;min-width:0}.sc-row-sum{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sc-row-meta{font-size:12px;color:var(--fgColor-muted,#59636e)}
+.sc-hidden{color:var(--fgColor-attention,#9a6700)}
+.sc-row .sc-card{margin:0 14px 10px 40px}
+.sc-panel-foot{border-top:1px solid var(--borderColor-default,#d0d7de);padding:10px 14px;background:var(--bgColor-muted,#f6f8fa)}
+.sc-primary{width:100%;height:32px;border-radius:6px;border:1px solid var(--button-primary-borderColor-rest,rgba(31,35,40,.15));background:var(--button-primary-bgColor-rest,#1f883d);color:var(--button-primary-fgColor-rest,#fff);font:600 13px system-ui;cursor:pointer}
+.sc-primary:disabled{opacity:.5;cursor:not-allowed}
+.sc-keys{margin-top:8px;text-align:center;font-size:12px;color:var(--fgColor-muted,#59636e)}
+.sc-keys kbd{font:11px ui-monospace,monospace;border:1px solid var(--borderColor-default,#d0d7de);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--bgColor-default,#fff)}
+.sc-banner{margin:10px 14px 0;padding:8px 12px;border-radius:6px;background:var(--bgColor-success-muted,#dafbe1);border:1px solid var(--borderColor-success-muted,#4ac26b66)}
+.sc-banner-done{background:var(--bgColor-done-muted,#fbefff);border-color:var(--borderColor-done-muted,#c297ff66)}
+.sc-msg{margin:10px 14px 0;font-size:12px}.sc-msg.sc-err{color:var(--fgColor-danger,#d1242f)}
+.sc-paste{margin:10px 14px;width:calc(100% - 28px);min-height:90px;font:12px ui-monospace,monospace}
+.sc-card,.sc-panel,.sc-toggle{--sc-accent:var(--fgColor-accent,#0969da);--sc-border:var(--borderColor-default,#d0d7de);--sc-subtle:var(--bgColor-muted,#f6f8fa);--sc-canvas:var(--bgColor-default,#fff);--sc-muted:var(--fgColor-muted,#59636e);--sc-success:var(--fgColor-success,#1a7f37)}
+.sc-card{
   border:1px solid var(--sc-border);border-left:3px solid var(--sc-accent);border-radius:6px;background:var(--sc-canvas);color:var(--fgColor-default,#1f2328);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;overflow:hidden}
 .sc-card[data-sc-where=inline]{margin:8px 16px 16px}
 .sc-card[data-sc-where=panel]{margin:0 0 8px}
@@ -431,6 +464,7 @@ html.sc-shift-wide body{margin-right:50vw!important}
 .sc-v-fix,.sc-v-revise{color:var(--sc-accent);border-color:var(--sc-accent);background:var(--bgColor-accent-muted,#ddf4ff)}
 .sc-v-reply,.sc-v-publish,.sc-v-post{color:var(--sc-success);border-color:var(--sc-success)}
 .sc-v-pushback,.sc-v-hold,.sc-v-drop{color:var(--fgColor-severe,#bc4c00);border-color:var(--fgColor-severe,#bc4c00)}
+.sc-label.sc-auto{color:var(--sc-success);border-color:var(--sc-success);background:none}
 .sc-v-manual{color:var(--fgColor-danger,#d1242f);border-color:var(--fgColor-danger,#d1242f)}
 .sc-card-body{padding:12px}
 .sc-summary{font-weight:600;margin-bottom:8px}
@@ -452,15 +486,12 @@ html.sc-shift-wide body{margin-right:50vw!important}
 .sc-seg .sc-btn:first-child{border-radius:6px 0 0 6px;margin-left:0}.sc-seg .sc-btn:last-child{border-radius:0 6px 6px 0}
 .sc-btn:hover{background:var(--bgColor-neutral-muted,#eaeef2)}
 .sc-btn.sc-suggested{border-style:dashed;border-color:var(--sc-accent);color:var(--sc-accent);position:relative;z-index:1}
-.sc-btn.sc-on{background:var(--sc-accent);border-color:var(--sc-accent);color:#fff;position:relative;z-index:1}
+.sc-btn.sc-on{background:var(--sc-accent);border-color:var(--sc-accent);color:var(--fgColor-onEmphasis,#fff);position:relative;z-index:1}
 .sc-btn.sc-on-auto{border-color:var(--sc-accent);color:var(--sc-accent);font-weight:600}
 .sc-note{flex:1;min-width:180px;height:28px;box-sizing:border-box;padding:0 10px;border:1px solid var(--sc-border);border-radius:6px;background:var(--sc-canvas);color:inherit;font:13px -apple-system,system-ui,sans-serif}
 .sc-note.sc-note-needed{border-color:var(--fgColor-danger,#d1242f)}
 .sc-oneline{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:13px}
 .sc-oneline-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--sc-muted)}
-.sc-badge{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor;color:var(--fgColor-attention,#9a6700)}
-.sc-author{font-weight:600}
-.sc-path{font-size:11px}
 .sc-empty{color:var(--sc-muted);font-style:italic}
 .sc-md>:first-child{margin-top:0}.sc-md>:last-child{margin-bottom:0}
 .sc-md p,.sc-md ul,.sc-md ol,.sc-md pre,.sc-md table,.sc-md blockquote{margin:0 0 8px}
@@ -470,7 +501,7 @@ html.sc-shift-wide body{margin-right:50vw!important}
 .sc-md th,.sc-md td{border:1px solid var(--borderColor-default,#d0d7de);padding:2px 8px}
 .sc-md pre{padding:8px;border-radius:6px;background:var(--bgColor-muted,#f6f8fa);overflow:auto}
 .sc-md blockquote{padding-left:10px;border-left:3px solid var(--borderColor-default,#d0d7de);color:var(--fgColor-muted,#59636e)}
-.sc-card code,.sc-item code{font-size:11.5px;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
+.sc-card code,.sc-row code{font-size:11.5px;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
 .sc-md pre code{padding:0;background:none}
 .sc-flash{outline:3px solid var(--fgColor-accent,#0969da);outline-offset:2px;transition:outline-color 1.5s}
 `;
@@ -481,6 +512,7 @@ function secondChairBootstrap() {
   let openId = null;
   let message = null;
   let serverUp = null;
+  let menuOpen = false;
   let rendering = false;
   let timer = null;
   const expanded = new Set();
@@ -508,6 +540,7 @@ function secondChairBootstrap() {
   const itemById = (id) => state.payload.items.find((x) => x.thread_id === id);
   const viewOf = (it) => ({
     expanded: expanded.has(it.thread_id),
+    expandedInPanel: expanded.has(it.thread_id),
     editing: editing.has(it.thread_id),
     hidden: Boolean(it.comment_id) && !anchorFor(it),
     position: `${state.payload.items.indexOf(it) + 1} of ${state.payload.items.length}`,
@@ -582,34 +615,34 @@ function secondChairBootstrap() {
     if (!panel || !toggle) return;
     const listEl = panel.querySelector('.sc-list');
     const scrollTop = listEl ? listEl.scrollTop : 0;
-    const pr = state ? progress(state) : null;
-    toggle.textContent = !pr ? 'SC' : done() ? 'SC ✓ done' : `SC r${state.payload.round} · ${pr.done}/${pr.total}`;
-    toggle.classList.toggle('sc-complete', Boolean(pr && pr.complete));
-    const title = state ? `#${state.payload.pr}${modeOf(state.payload) === 'review' ? ' review' : ''} round ${state.payload.round}${state.payload.head ? ` @ ${String(state.payload.head).slice(0, 8)}` : ''}` : 'No proposals';
-    const server = serverUp === null ? '' : `<span class="sc-server ${serverUp ? 'sc-up' : 'sc-down'}" title="${SC_SERVER}">server ${serverUp ? 'on' : 'off'}</span>`;
-    const bar = `<div class="sc-bar"><span class="sc-title">${esc(title)}${pr ? ` — ${pr.done}/${pr.total}${pr.auto ? ` (${pr.auto} auto)` : ''}` : ''}</span>${server}
-  <button type="button" data-sc-act="wide" title="Toggle half-screen width">${ui.wide ? '⇥ narrow' : '⇤ half screen'}</button>
-  <button type="button" data-sc-act="panel">✕</button></div>
-  <div class="sc-bar">
-  <button type="button" data-sc-act="fetch" ${serverUp ? '' : 'disabled'}>Load from server</button>
-  <button type="button" data-sc-act="import">Load from clipboard</button>
-  ${done() ? '' : `<button type="button" data-sc-act="export" ${pr && pr.complete ? '' : 'disabled'} title="${pr && !pr.complete ? `${pr.total - pr.done} left` : ''}">Send decisions</button>`}
-  ${state && !done() ? '<button type="button" data-sc-act="markdone">Mark as done</button>' : ''}
-  ${state ? '<button type="button" data-sc-act="clear">Clear</button>' : ''}</div>`;
-    let banner = '';
     const info = doneInfo(state);
+    const pr = state ? progress(state) : null;
+    toggle.innerHTML = `<span class="sc-mark">SC</span> ${info ? '✓ done' : pr ? `${pr.done}/${pr.total}` : ''}`;
+    toggle.classList.toggle('sc-complete', Boolean(pr && pr.complete && !info));
+    const pct = (n) => (pr && pr.total ? (100 * n) / pr.total : 0);
+    const head = `<div class="sc-panel-head">
+  <div class="sc-hrow"><span class="sc-mark">SC</span><b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${modeOf(state.payload)} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
+    ${info ? '<span class="sc-label sc-done-label">✓ Done</span>' : ''}
+    <span class="sc-dot ${serverUp ? 'sc-up' : serverUp === false ? 'sc-down' : ''}" title="server ${serverUp ? 'on' : 'off'} · ${SC_SERVER}"></span>
+    <button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
+  ${pr && !info ? `<div class="sc-progress"><i style="width:${pct(pr.done - pr.auto)}%" class="sc-p-mine"></i><i style="width:${pct(pr.auto)}%" class="sc-p-auto"></i></div>
+  <div class="sc-hrow sc-muted sc-small"><span><b class="sc-fg">${pr.done}</b> of ${pr.total} decided</span>${pr.auto ? `<span>· ${pr.auto} auto</span>` : ''}<span class="sc-grow"></span><span>${pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send'}</span></div>` : ''}
+</div>`;
+    const menu = menuOpen ? `<div class="sc-menu">
+  <a href="#" data-sc-act="fetch">Load from server</a><a href="#" data-sc-act="import">Load from clipboard</a><hr>
+  <a href="#" data-sc-act="wide">${ui.wide ? 'Narrow panel' : 'Half screen'}</a>
+  ${state && !info ? '<hr><a href="#" data-sc-act="markdone">Mark as done</a>' : ''}
+  ${state ? '<a href="#" class="sc-danger" data-sc-act="clear">Clear from this browser</a>' : ''}</div>` : '';
+    let banner = '';
     if (info) banner = `<div class="sc-banner sc-banner-done"><b>Done</b> · ${esc(SC_DONE_REASON[info.reason])} ${esc(formatTime(info.at))}. Cards are hidden on the page. <a href="#" data-sc-act="showdone">${showDoneCards ? 'Hide cards' : 'Show cards on the page'}</a></div>`;
-    else if (state?.sentAt) banner = `<div class="sc-banner">Decisions sent ${esc(state.sentAt)}. The agent picks them up from the server; the next round loads here.</div>`;
-    let tools = '';
-    if (state) {
-      const items = visibleItems(state, ui.filter);
-      const pos = items.findIndex((it) => it.thread_id === openId);
-      tools = `<div class="sc-bar">${buildFilterBar(state, ui.filter)}</div>
-  <div class="sc-bar sc-nav"><button type="button" data-sc-act="prev" title="Previous (↑ or k)">‹</button><span>${pos < 0 ? '–' : pos + 1} / ${items.length}</span><button type="button" data-sc-act="next" title="Next (↓ or j)">›</button><span>↑/↓ or j/k move · Enter expands</span></div>`;
-    }
+    else if (state?.sentAt) banner = `<div class="sc-banner">${esc(sentNote(state))}</div>`;
     const msg = message ? `<div class="sc-msg${message.error ? ' sc-err' : ''}">${richText(message.text)}</div>` : '';
     const paste = !state || message?.showPaste ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
-    panel.innerHTML = `${bar}${banner}${tools}${msg}${paste}<div class="sc-list">${state ? buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>`;
+    const foot = state && !info
+      ? `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete ? '' : 'disabled'}>Send decisions${pr.complete ? '' : ` · ${pr.total - pr.done} left`}</button>
+  <div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${decisionsFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div></div>`
+      : state ? '<div class="sc-panel-foot sc-muted sc-small">Read only. A new proposal from the agent reopens this pull request.</div>' : '';
+    panel.innerHTML = `${head}${menu}${banner}${state ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${state ? buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
     panel.querySelector('.sc-list').scrollTop = scrollTop;
     applyLayout();
   }
@@ -618,8 +651,8 @@ function secondChairBootstrap() {
   function updateProgress(id) {
     const pr = progress(state);
     const toggle = document.querySelector('.sc-toggle');
-    if (toggle && !done()) toggle.textContent = `SC r${state.payload.round} · ${pr.done}/${pr.total}`;
-    toggle?.classList.toggle('sc-complete', pr.complete);
+    if (toggle && !done()) toggle.innerHTML = `<span class="sc-mark">SC</span> ${pr.done}/${pr.total}`;
+    toggle?.classList.toggle('sc-complete', pr.complete && !done());
     const send = document.querySelector('.sc-panel [data-sc-act=export]');
     if (send) send.disabled = !(pr.complete && !done());
     const needed = missingNote(state, itemById(id));
@@ -722,6 +755,7 @@ function secondChairBootstrap() {
       serverUp = true;
       if (r.status === 200) {
         state.sentAt = out.exported_at;
+        state.sentVia = 'server';
         save();
         message = null;
         renderAll(true);
@@ -733,6 +767,7 @@ function secondChairBootstrap() {
       serverUp = false;
       // An offline final send also ends the triage.
       state.sentAt = out.exported_at;
+      state.sentVia = 'clipboard';
       save();
       GM_setClipboard(JSON.stringify(out, null, 2), 'text');
       message = { text: 'The server is not running, so the decisions are on the clipboard. Paste them to the agent.' };
@@ -789,7 +824,7 @@ function secondChairBootstrap() {
   function select(id) {
     openId = id;
     renderPanel();
-    const row = document.querySelector(`.sc-item[data-sc-item="${CSS.escape(id)}"]`);
+    const row = document.querySelector(`.sc-row[data-sc-item="${CSS.escape(id)}"]`);
     if (row) row.scrollIntoView({ block: 'nearest' });
     jump(id);
   }
@@ -815,11 +850,20 @@ function secondChairBootstrap() {
     const act = el.dataset.scAct;
     const id = el.dataset.scId;
     if (act !== 'toggle') e.preventDefault();
+    if (act !== 'menu' && menuOpen) {
+      // Any other action closes the menu.
+      menuOpen = false;
+      renderPanel();
+    }
     if (act === 'panel') {
       ui.open = !ui.open;
+      menuOpen = false;
       saveUi();
       applyLayout();
       if (ui.open) sync(false);
+    } else if (act === 'menu') {
+      menuOpen = !menuOpen;
+      renderPanel();
     } else if (act === 'wide') {
       ui.wide = !ui.wide;
       saveUi();
@@ -840,6 +884,7 @@ function secondChairBootstrap() {
         state.payload.closed_at = r.body.closed_at;
         message = null;
       } catch (err) {
+        if (/not reachable|timed out/.test(err.message)) serverUp = false;
         state.doneAt = now;
         message = { text: `Marked as done in this browser. The server did not record it (${err.message}).` };
       }
@@ -898,6 +943,18 @@ function secondChairBootstrap() {
     }
   });
 
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el.dataset?.scAct !== 'filterselect') return;
+    ui.filter = el.value || 'all';
+    saveUi();
+    renderPanel();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && e.target?.matches?.('.sc-reply, .sc-note')) e.target.blur();
+  });
+
   document.addEventListener('keydown', (e) => {
     if (!state || !ui.open || e.altKey || e.ctrlKey || e.metaKey) return;
     const t = e.target;
@@ -909,6 +966,18 @@ function secondChairBootstrap() {
     else if (e.key === 'Enter' && openId) {
       toggleSet(expanded, openId);
       refreshThread(openId);
+    } else if (openId && /^[1-9]$/.test(e.key)) {
+      const b = decisionsFor(state.payload)[Number(e.key) - 1];
+      if (!b || done()) return;
+      const d = state.decisions[openId];
+      d.decision = d.decision === b.key ? null : b.key;
+      save();
+      refreshThread(openId);
+    } else if (openId && e.key === 'e' && !done()) {
+      editing.add(openId);
+      expanded.add(openId);
+      refreshThread(openId);
+      document.querySelector(`.sc-card[data-sc-card="${CSS.escape(openId)}"] textarea.sc-reply`)?.focus();
     } else return;
     e.preventDefault();
     e.stopPropagation();

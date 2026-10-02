@@ -91,6 +91,16 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check(await page.locator(`${card('T3')}.sc-compact`).count() === 1, 'an auto card is compact');
   check((await page.textContent(card('T2'))).includes('S2 legacy field'), 'the older summary_pl field still shows');
 
+  const keys = await openPage(browser, port);
+  await keys.waitForSelector(card('T2'));
+  await keys.click('.sc-toggle');
+  for (let i = 0; i < 3; i++) await keys.keyboard.press('j');
+  await keys.keyboard.press('2');
+  check((await keys.textContent('.sc-row[data-sc-item=T2] .sc-label')).trim() === 'Fix', 'j, j, j then 2 decides Fix on the third thread');
+  await keys.keyboard.press('e');
+  check(await keys.locator(`${card('T2')} textarea.sc-reply`).count() === 1, 'e opens Write');
+  await keys.close();
+
   await page.click(`${card('T1')} [data-sc-act=tab][data-sc-val=write]`);
   const noScroll = await page.evaluate((s) => { const t = document.querySelector(`${s} textarea`); return t && t.scrollHeight <= t.clientHeight + 4; }, card('T1'));
   check(noScroll, 'the reply editor is tall enough to need no scrolling');
@@ -99,49 +109,54 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check((await page.textContent('.sc-toggle')).includes('4/6'), 'a decision from the inline card counts');
 
   await page.click('.sc-toggle');
-  check((await page.textContent('.sc-server')) === 'server on', 'the panel shows the server as on');
+  check(await page.locator('.sc-dot.sc-up').count() === 1, 'the panel shows the server as on');
   check(await page.evaluate(() => getComputedStyle(document.body).marginRight !== '0px'), 'the page narrows next to the panel');
+  await page.click('[data-sc-act=menu]');
   await page.click('[data-sc-act=wide]');
+  check(await page.locator('.sc-menu').count() === 0, 'an action closes the menu');
   check(await page.evaluate(() => Math.abs(document.querySelector('.sc-panel').getBoundingClientRect().width - innerWidth / 2) < 2), 'half screen makes the panel half the window wide');
   check(await page.evaluate(() => Math.abs(parseFloat(getComputedStyle(document.body).marginRight) - innerWidth / 2) < 2), 'and the page gives up the same half');
 
   await page.click('[data-sc-act=filter][data-sc-val=auto]');
-  check((await page.locator('.sc-item').count()) === 3, 'the Auto filter shows the three auto items');
+  check((await page.locator('.sc-row').count()) === 3, 'the Auto filter shows the three auto items');
   await page.click('[data-sc-act=filter][data-sc-val=todo]');
-  check((await page.locator('.sc-item').count()) === 2, 'To decide shows the two undecided ones');
+  check((await page.locator('.sc-row').count()) === 2, 'To decide shows the two undecided ones');
   await page.click('[data-sc-act=filter][data-sc-val=all]');
 
-  await page.click('.sc-item-head[data-sc-id=T1]');
+  await page.click('.sc-row-main[data-sc-id=T1]');
   await page.waitForTimeout(700);
   check(await inView(page, card('T1')), 'selecting an item scrolls the page to its thread');
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(900);
-  check(await page.locator('.sc-item.sc-open[data-sc-item=T2]').count() === 1 && await inView(page, card('T2')), 'ArrowDown selects the next item and scrolls to it');
+  check(await page.locator('.sc-row.sc-selected[data-sc-item=T2]').count() === 1 && await inView(page, card('T2')), 'ArrowDown selects the next item and scrolls to it');
   await page.keyboard.press('j');
   await page.waitForTimeout(900);
   check(await inView(page, card('T3')), 'j moves on as well');
   await page.keyboard.press('j');
   await page.waitForTimeout(1200);
   check(await page.evaluate(() => document.querySelector('details').open) && await inView(page, card('T4')), 'moving to a folded thread unfolds it');
-  await page.click('.sc-nav [data-sc-act=next]');
+  await page.keyboard.press('j');
   await page.waitForSelector(card('T5'), { timeout: 6000 }).catch(() => {});
   await page.waitForTimeout(900);
   check(await inView(page, card('T5')), 'moving to an unloaded thread clicks Load more and scrolls to it');
   await page.keyboard.press('k');
   await page.waitForTimeout(600);
-  check(await page.locator('.sc-item.sc-open[data-sc-item=T4]').count() === 1, 'k moves back');
+  check(await page.locator('.sc-row.sc-selected[data-sc-item=T4]').count() === 1, 'k moves back');
 
-  await page.click('.sc-item-head[data-sc-id=T2]');
-  await page.click(`${card('T2', 'panel')} [data-sc-val=reply]`);
-  await page.click('.sc-item-head[data-sc-id=G]');
+  await page.click('.sc-row-main[data-sc-id=T2]');
+  await page.keyboard.press('1');
+  check((await page.locator('.sc-row[data-sc-item=T2]').getAttribute('class')).includes('sc-decided'), 'the key 1 decides Reply on the selected row');
+  await page.click('.sc-row-main[data-sc-id=G]');
   await page.click(`${card('G', 'panel')} [data-sc-val=manual]`);
   await page.fill(`${card('G', 'panel')} .sc-note`, 'I will write this one');
-  await page.click('.sc-item-head[data-sc-id=T4]');
+  await page.click('.sc-row-main[data-sc-id=T4]');
+  await page.keyboard.press('Enter');
   await page.click(`${card('T4', 'panel')} [data-sc-val=manual]`);
   check(!(await page.isDisabled('[data-sc-act=export]')), 'send unlocks at 6/6');
 
   await page.click('[data-sc-act=export]');
   await page.waitForSelector('.sc-banner');
+  check(/Decisions sent .*picks them up from the server/.test(await page.textContent('.sc-banner')), 'the sent banner names the server when it took the decisions');
   const got = await api('GET', '/api/decisions?repo=acme/w&pr=7&round=1');
   const out = got.status === 200 ? JSON.parse(got.responseText) : { decisions: [] };
   const by = Object.fromEntries(out.decisions.map((d) => [d.thread_id, d]));
@@ -157,11 +172,13 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
 
   // Round 2 in reply mode: sending the final round ends the triage and takes the cards off the page.
   await api('PUT', '/api/proposals', { ...payload, round: 2, items: payload.items.map((i) => ({ ...i, verdict: 'publish', auto: false })) });
+  await page.click('[data-sc-act=menu]');
   await page.click('[data-sc-act=fetch]');
-  await page.waitForFunction(() => document.querySelector('.sc-toggle').textContent.includes('/6'));
+  await page.waitForFunction(() => document.querySelector('.sc-panel-head').textContent.includes('round 2'));
+  check((await page.textContent('.sc-toggle')).includes('0/6'), 'round 2 starts with nothing decided');
   for (const id of ['G', 'T1', 'T2', 'T3', 'T4', 'T5']) {
-    await page.click(`.sc-item-head[data-sc-id=${id}]`);
-    await page.click(`${card(id, 'panel')} [data-sc-val=publish]`);
+    await page.click(`.sc-row-main[data-sc-id=${id}]`);
+    await page.keyboard.press('1');
   }
   await page.click('[data-sc-act=export]');
   await page.waitForSelector('.sc-banner-done');
@@ -182,6 +199,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   const page2 = await openPage(browser, port, storedR1);
   await page2.waitForFunction(() => document.querySelector('.sc-toggle').textContent.includes('done'));
   check(await page2.locator('.sc-card[data-sc-where=inline]').count() === 0, 'a closed triage shows no cards on the page');
+  check(/closed/.test(await page2.textContent('.sc-banner-done')) && !/by the agent/.test(await page2.textContent('.sc-banner-done')), 'a closed banner does not say who closed it');
   await page2.click('[data-sc-act=showdone]');
   await page2.waitForSelector('.sc-card[data-sc-where=inline]');
   check(await page2.locator('.sc-card[data-sc-where=inline].sc-compact').count() >= 4, 'Show cards brings them back, compact');
@@ -189,11 +207,14 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   const r1state = JSON.stringify({ 'sc:acme/w#7': JSON.stringify({ payload, decisions: Object.fromEntries(payload.items.map((i) => [i.thread_id, { decision: 'manual', note: '', reply: '', replyEdited: false }])) }) });
   const offline = await openPage(browser, 0, r1state);
   await offline.click('.sc-toggle');
-  await offline.waitForSelector('.sc-server.sc-down');
+  await offline.waitForSelector('.sc-dot.sc-down');
   check(true, 'the panel shows the server as off');
   await offline.click('[data-sc-act=export]');
   await offline.waitForFunction(() => window.__clip);
   check(JSON.parse(await offline.evaluate(() => window.__clip)).decisions.length === 6, 'an offline send puts the decisions on the clipboard');
+  await offline.waitForSelector('.sc-banner');
+  const offBanner = await offline.textContent('.sc-banner');
+  check(/clipboard/.test(offBanner) && !/server/.test(offBanner), 'the offline sent banner talks about the clipboard, not the server');
 
   // Review mode: the comments of a pending review on someone else's PR, decided Post, Revise or Drop.
   await api('PUT', '/api/proposals', {
@@ -208,7 +229,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check((await rv.textContent(card('C1'))).includes('Comment to post'), 'a review comment card says Comment to post');
   await rv.click(`${card('C1')} [data-sc-val=revise]`);
   await rv.click('.sc-toggle');
-  await rv.click('.sc-item-head[data-sc-id=BODY]');
+  await rv.click('.sc-row-main[data-sc-id=BODY]');
   await rv.click(`${card('BODY', 'panel')} [data-sc-val=post]`);
   check(await rv.isDisabled('[data-sc-act=export]'), 'send stays locked while Revise has no note');
   check(await rv.locator(`${card('C1')} .sc-note.sc-note-needed`).count() === 1, 'the empty note is marked');
@@ -224,6 +245,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check(rout.mode === 'review' && rout.decisions.find((d) => d.thread_id === 'C1')?.note === 'say it shorter', 'the review decisions reach the server with the note');
 
   rv.on('dialog', (d) => d.accept());
+  await rv.click('[data-sc-act=menu]');
   await rv.click('[data-sc-act=markdone]');
   await rv.waitForSelector('.sc-banner-done');
   const closedNow = await api('GET', '/api/proposals?repo=acme/w&pr=8');

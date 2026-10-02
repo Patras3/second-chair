@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
-const { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
-  new Function(`${source}\nreturn { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
+const { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
+  new Function(`${source}\nreturn { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
 
 const payload = (over = {}) => ({
   tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc123',
@@ -158,7 +158,7 @@ test('an auto flag with a verdict the round does not know stays undecided', () =
   assert.deepEqual(effective(s, s.payload.items[0]), { decision: null, auto: false });
 });
 
-test('filters split auto, yours and undecided, and chips show counts', () => {
+test('filters split auto, yours and undecided', () => {
   const s = stateFor(autoPayload(), null);
   const ids = (f) => visibleItems(s, f).map((i) => i.thread_id);
   assert.deepEqual(ids('all'), ['A', 'B', 'C']);
@@ -167,9 +167,6 @@ test('filters split auto, yours and undecided, and chips show counts', () => {
   assert.deepEqual(ids('mine'), []);
   assert.deepEqual(ids('d:fix'), ['A']);
   assert.deepEqual(ids('nonsense'), ['A', 'B', 'C']);
-  const bar = buildFilterBar(s, 'auto');
-  assert.match(bar, /sc-chip sc-chip-on" data-sc-act="filter" data-sc-val="auto">Auto <b>2<\/b>/);
-  assert.ok(!bar.includes('data-sc-val="mine"'), 'an empty chip is left out');
 });
 
 test('step wraps around and starts at an end when nothing is selected', () => {
@@ -283,4 +280,59 @@ test('a read-only card has no buttons, no editor and no note', () => {
 test('a stored state whose final round was sent stays done without the server', () => {
   const stored = JSON.parse(JSON.stringify({ ...stateFor(payload({ round: 2, published_at: 't2' }), null), sentAt: 's2' }));
   assert.equal(doneInfo(stored).reason, 'final-sent');
+});
+
+test('panel rows are grouped by file with general items first', () => {
+  const items = [
+    { thread_id: 'A', path: 'src/x.js' }, { thread_id: 'G', comment_id: null }, { thread_id: 'B', path: 'docs/y.md' }, { thread_id: 'C', path: 'src/x.js' },
+  ];
+  assert.deepEqual(groupItems(items).map((g) => [g.label, g.items.map((i) => i.thread_id)]), [['General', ['G']], ['src/x.js', ['A', 'C']], ['docs/y.md', ['B']]]);
+});
+
+test('filters are tabs with counters, and decisions sit in a select', () => {
+  const s = stateFor(autoPayload(), null);
+  const bar = buildFilterBar(s, 'auto');
+  assert.match(bar, /class="sc-ftab sc-ftab-on" data-sc-act="filter" data-sc-val="auto">Auto<b>2<\/b>/);
+  assert.match(bar, /<select class="sc-fdecision"[\s\S]*<option value="d:fix">Fix \(1\)<\/option>/);
+  assert.ok(bar.includes('data-sc-val="mine"'), 'the fixed tabs stay even when empty');
+});
+
+test('a panel row shows status, summary, author, line and decision', () => {
+  const s = stateFor(payload(), null);
+  s.decisions.T1.decision = 'fix';
+  const html = buildPanelList(s, null, 'all', () => ({}));
+  assert.match(html, /class="sc-group"[\s\S]*a\/b\/C\.java/);
+  assert.match(html, /class="sc-row sc-decided"[\s\S]*change &lt;x&gt;[\s\S]*bob · line 3[\s\S]*sc-label sc-v-fix">Fix/);
+});
+
+test('an auto label is green, and an incomplete Revise is not decided', () => {
+  const a = stateFor(autoPayload(), null);
+  assert.match(buildPanelList(a, null, 'all', () => ({})), /sc-label sc-auto sc-v-fix">auto · Fix/);
+  assert.match(buildCard(a, a.payload.items[0], 'inline', {}), /sc-label sc-auto sc-v-fix">auto · Fix/);
+  const s = stateFor(review(), null);
+  s.decisions.C1.decision = 'revise';
+  assert.ok(!buildCard(s, s.payload.items[0], 'inline').includes('sc-card sc-decided'));
+  assert.ok(!buildPanelList(s, null, 'all', () => ({})).includes('class="sc-row sc-decided"'));
+  assert.match(buildPanelList(s, null, 'all', () => ({})), /needs a note/);
+  s.decisions.C1.note = 'shorter';
+  assert.match(buildCard(s, s.payload.items[0], 'inline'), /sc-card sc-decided/);
+});
+
+test('the summary has no extra gap above it, and the dead label table is gone', () => {
+  const s = stateFor(payload(), null);
+  assert.match(buildCard(s, s.payload.items[0], 'inline'), /class="sc-summary sc-md"/);
+  assert.ok(!source.includes('SC_VERDICT_LABEL'));
+  assert.ok(source.includes('color:var(--fgColor-onEmphasis,#fff)'));
+});
+
+test('the done banner cannot say who closed it, and the sent note fits both ways of sending', () => {
+  assert.equal(SC_DONE_REASON.closed, 'closed');
+  const s = stateFor(payload(), null);
+  s.sentAt = 'T';
+  s.sentVia = 'server';
+  assert.match(sentNote(s), /^Decisions sent .*\. The agent picks them up from the server/);
+  s.sentVia = 'clipboard';
+  assert.ok(!/server/.test(sentNote(s)));
+  assert.match(sentNote(s), /clipboard/);
+  assert.equal(stateFor(payload({ published_at: 'x' }), s).sentVia ?? null, null);
 });
