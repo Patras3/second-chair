@@ -7,6 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:net';
 import { probe } from '../lib/daemon.mjs';
+import { buildPayload } from '../lib/payload.mjs';
 
 const run = promisify(execFile);
 const BIN = new URL('../bin/second-chair', import.meta.url).pathname;
@@ -104,4 +105,20 @@ test('stop does not signal a stale pid file', async () => {
     bystander.kill();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('build wraps items, puts general items first and refuses bad ones', () => {
+  const p = buildPayload({ repo: 'octo-org/example', pr: 3, round: 1, head: 'abc', mode: 'reply', items: [
+    { thread_id: 'T1', comment_id: 1, verdict: 'fix', reply_en: 'a' },
+    { thread_id: 'GLOBAL', comment_id: null, verdict: 'manual', reply_en: '' },
+  ] });
+  assert.deepEqual(p.items.map((i) => i.thread_id), ['GLOBAL', 'T1']);
+  assert.equal(p.tool, 'second-chair');
+  assert.equal(p.mode, undefined, 'reply is the default and is left out');
+  assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 1, head: 'h', items: [{ thread_id: 'A', verdict: 'fix' }] }), /A: missing reply_en/);
+  assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 1, head: 'h', items: [{ thread_id: 'A', verdict: 'publish', reply_en: '' }] }), /A: verdict publish is not a round 1 reply decision/);
+  assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 1, head: 'h', items: [{ thread_id: 'A', verdict: 'fix', reply_en: '' }, { thread_id: 'A', verdict: 'fix', reply_en: '' }] }), /duplicate thread_id A/);
+  const r = buildPayload({ repo: 'o/n', pr: 1, round: 1, head: 'h', mode: 'review', items: [{ thread_id: 'C', comment_id: 5, verdict: 'post', reply_en: 'x', origin: 'user', original_en: 'x' }] });
+  assert.equal(r.mode, 'review');
+  assert.equal(r.items[0].origin, 'user');
 });

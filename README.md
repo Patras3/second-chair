@@ -12,8 +12,7 @@ texts in a second round.
 |:--|:--|
 | `userscript/second-chair.user.js` | The userscript: cards under every thread, a side panel, decisions |
 | `lib/server.mjs` | Local server on `127.0.0.1:7788`: stores proposals and decisions, serves the userscript |
-| `bin/second-chair` | CLI for the agent: `serve`, `push`, `wait`, `get`, `close`, `status` |
-| `build_payload.py` | Wraps proposal arrays into a payload |
+| `bin/second-chair` | CLI for the agent: `build`, `serve`, `push`, `wait`, `get`, `close`, `status` |
 
 No dependencies. The server and the CLI need Node 22 or newer.
 
@@ -66,7 +65,7 @@ comment it would post, then pushes a payload with `"mode": "review"`, one item p
 comment plus one general item for the review body:
 
 ```
-build_payload.py --mode review --repo owner/name --pr 282 --round 1 --head <sha> items.json > payload.json
+second-chair build --repo owner/name --pr 282 --round 1 --head <sha> --mode review items.json > payload.json
 bin/second-chair push payload.json
 ```
 
