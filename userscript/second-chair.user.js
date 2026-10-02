@@ -774,7 +774,7 @@ function secondChairBootstrap() {
     } catch {
       if (here !== loc) return;
       serverUp = false;
-      if (force) message = { error: true, text: `The server at ${SC_SERVER} is not running. Start it with \`second-chair serve\`, or load from the clipboard.`, showPaste: true };
+      if (force) message = { error: true, text: `The server at ${SC_SERVER} is not running. Start it with \`second-chair start\`, or load from the clipboard.`, showPaste: true };
     }
     renderPanel();
   }

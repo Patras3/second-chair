@@ -12,6 +12,7 @@ This skill does not say how to review. The findings come from you, from another 
 
 ## Rules
 
+- Never post, reply, resolve or edit anything on GitHub yourself. Comments reach the pending review only through `second-chair draft`, and edits, deletions and the body only through `second-chair publish`.
 - Never submit the review unless the user asked for it in this session. Then use `publish --submit` with the event they named: `COMMENT`, `APPROVE` or `REQUEST_CHANGES`.
 - Never add `--submit` on your own after an error. This holds for every error, including the one about a missing review body.
 - Never create a second pending review. `second-chair draft` adds to the existing one.

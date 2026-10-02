@@ -39,6 +39,10 @@ Then:
 
 Open any pull request on github.com. A small **SC** pill at the bottom right means it works.
 
+### Where the command runs
+
+The plugin puts `second-chair` on the `PATH` of Claude Code's Bash tool only. Your own terminal does not have it. With the plugin alone, run the commands inside Claude Code: type `!` and the command, for example `! second-chair doctor`, or ask the agent to run it. `npm install -g github:Patras3/second-chair` puts the command in your own shell too.
+
 ### Without Claude Code
 
 ```
@@ -152,6 +156,8 @@ The keys work when the panel is open and the focus is not in a text field.
 
 ## Commands
 
+With the plugin alone, these commands run inside Claude Code. See [Where the command runs](#where-the-command-runs).
+
 | Command | What it does |
 |:--|:--|
 | `second-chair start [--quiet]` | Starts the server in the background, unless one already answers on the port. Writes a pid file and a log to the data directory. |
@@ -248,11 +254,11 @@ The server is reachable only from the machine it runs on. A server started insid
 - In Chrome and Edge, turn on **Allow user scripts** or developer mode. See [Browser setup](#browser-setup).
 - Reload the page after you install the script.
 
-**The panel shows a red dot ("server off").** The page cannot reach the server. Run `second-chair start`, or `second-chair doctor` to see why. Without a server, **Load from clipboard** in the **⋯** menu reads a payload from the clipboard. **Send decisions** then copies the decisions to the clipboard, and you paste them to the agent.
+**The panel shows a red dot ("server off").** The page cannot reach the server. Start a Claude Code session, or run `! second-chair start` in one. `! second-chair doctor` shows why the server is down. In your own terminal, the commands work after `npm install -g` (see [Where the command runs](#where-the-command-runs)). Without a server, **Load from clipboard** in the **⋯** menu reads a payload from the clipboard. **Send decisions** then copies the decisions to the clipboard, and you paste them to the agent.
 
 **Port 7788 is in use.** `second-chair doctor` says when another program holds the port. Set a free port in your shell profile, for example `export SECOND_CHAIR_PORT=7790`. Claude Code and its hook then use it too. Start the server again, then install the userscript again from `http://127.0.0.1:7790/second-chair.user.js`. The server writes its port into the script it serves, so the old script still calls port 7788.
 
-**`gh` is not logged in.** Run `gh auth login`, then check with `gh auth status`. `second-chair doctor` also reports a `gh` that is older than 2.48.0.
+**`gh` is not logged in.** Run `gh auth login` in a terminal, then check with `gh auth status`. `second-chair doctor` also reports a `gh` that is older than 2.48.0.
 
 **A thread shows "not loaded on page".** GitHub loads long conversations in parts and folds resolved threads. Select the row in the panel. Second Chair unfolds folded threads, asks GitHub for the thread by its link, and clicks **Load more** until the thread appears. If GitHub still does not show it, the card opens in the panel, and you decide it there. The comments of a pending review show only in the **Files changed** tab.
 
@@ -264,7 +270,7 @@ The server is reachable only from the machine it runs on. A server started insid
 
 ## Uninstall
 
-1. Stop the server: `second-chair stop`.
+1. Stop the server. In Claude Code, run `! second-chair stop`. If you installed the command with npm, `second-chair stop` in a terminal works too.
 2. In Claude Code, remove the plugin: `/plugin uninstall second-chair@second-chair`. Remove the marketplace too, if you like: `/plugin marketplace remove second-chair`.
 3. Remove Second Chair from the script manager's dashboard.
 4. Delete the data directory: `rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/second-chair"`. If you set `SECOND_CHAIR_HOME`, delete that directory instead.

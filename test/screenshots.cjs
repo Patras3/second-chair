@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const { nodeRequest, installGm } = require('./gm-harness.cjs');
 
 const OUT = path.join(__dirname, '..', 'docs', 'images');
 const script = fs.readFileSync(path.join(__dirname, '..', 'userscript', 'second-chair.user.js'), 'utf8');
@@ -222,39 +223,14 @@ function page({ theme, pr, title, branch, blocks, files }) {
 </body></html>`;
 }
 
-// ---- Copied from test/dom-smoke.cjs: GM stubs and a request bridge to the server ------------------
-
-function nodeRequest(port, { method, url, headers, data }) {
-  return new Promise((resolve) => {
-    const u = new URL(url);
-    const req = http.request({ host: '127.0.0.1', port, method, path: u.pathname + u.search, headers }, (res) => {
-      let body = '';
-      res.on('data', (c) => { body += c; });
-      res.on('end', () => resolve({ ok: true, status: res.statusCode, responseText: body }));
-    });
-    req.on('error', () => resolve({ ok: false }));
-    if (data) req.write(data);
-    req.end();
-  });
-}
+// ---- The browser page ------------------------------------------------------------------------------
 
 async function openPage(browser, port, { url, html, store, viewport, scale = 1.5 }) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: scale, locale: 'en-US', timezoneId: 'UTC' });
   await context.clock.setFixedTime(new Date('2026-09-30T18:20:00Z'));
   const page = await context.newPage();
   await page.route(url, (r) => r.fulfill({ contentType: 'text/html', body: html }));
-  // GM_xmlhttpRequest goes to the server through Node, the way Tampermonkey bypasses CORS.
-  await page.exposeFunction('__gmx', (req) => nodeRequest(port, req));
-  await page.addInitScript((s) => {
-    const store = s ? JSON.parse(s) : {};
-    window.GM_getValue = (k, d) => (k in store ? store[k] : d);
-    window.GM_setValue = (k, v) => { store[k] = v; };
-    window.GM_deleteValue = (k) => { delete store[k]; };
-    window.GM_setClipboard = () => {};
-    window.GM_xmlhttpRequest = (o) => {
-      window.__gmx({ method: o.method, url: o.url, headers: o.headers, data: o.data }).then((r) => (r.ok ? o.onload({ status: r.status, responseText: r.responseText }) : o.onerror()));
-    };
-  }, store ? JSON.stringify(store) : null);
+  await installGm(page, port, store ? JSON.stringify(store) : null);
   await page.goto(url);
   for (const v of vendor) await page.addScriptTag({ content: v });
   await page.addScriptTag({ content: script });

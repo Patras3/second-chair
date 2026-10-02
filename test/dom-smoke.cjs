@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const { nodeRequest, installGm } = require('./gm-harness.cjs');
 
 const script = fs.readFileSync(path.join(__dirname, '..', 'userscript', 'second-chair.user.js'), 'utf8');
 // Tampermonkey loads these through @require; the test loads the same versions from test/vendor.
@@ -31,36 +32,10 @@ const PAGE = `<html><head></head><body>
 <button id="more" onclick="const d=document.createElement('div');d.id='discussion_r55';d.textContent='comment 55';this.after(d);this.remove()">Load more…</button>
 <div style="height:3000px"></div></body></html>`;
 
-function nodeRequest(port, { method, url, headers, data }) {
-  return new Promise((resolve) => {
-    const u = new URL(url);
-    const req = http.request({ host: '127.0.0.1', port, method, path: u.pathname + u.search, headers }, (res) => {
-      let body = '';
-      res.on('data', (c) => { body += c; });
-      res.on('end', () => resolve({ ok: true, status: res.statusCode, responseText: body }));
-    });
-    req.on('error', () => resolve({ ok: false }));
-    if (data) req.write(data);
-    req.end();
-  });
-}
-
 async function openPage(browser, port, store, pr = 7) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   await page.route(`https://github.com/acme/w/pull/${pr}`, (r) => r.fulfill({ contentType: 'text/html', body: PAGE }));
-  // GM_xmlhttpRequest goes to the test server through Node, the way Tampermonkey bypasses CORS.
-  await page.exposeFunction('__gmx', (req) => (port ? nodeRequest(port, req) : Promise.resolve({ ok: false })));
-  await page.addInitScript((s) => {
-    const store = s ? JSON.parse(s) : {};
-    window.GM_getValue = (k, d) => (k in store ? store[k] : d);
-    window.GM_setValue = (k, v) => { store[k] = v; };
-    window.GM_deleteValue = (k) => { delete store[k]; };
-    window.GM_setClipboard = (t) => { window.__clip = t; };
-    window.GM_xmlhttpRequest = (o) => {
-      window.__gmx({ method: o.method, url: o.url, headers: o.headers, data: o.data }).then((r) => (r.ok ? o.onload({ status: r.status, responseText: r.responseText }) : o.onerror()));
-    };
-    window.__store = store;
-  }, store ?? null);
+  await installGm(page, port, store);
   await page.goto(`https://github.com/acme/w/pull/${pr}`);
   for (const v of vendor) await page.addScriptTag({ content: v });
   await page.addScriptTag({ content: script });
