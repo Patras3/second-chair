@@ -9,6 +9,7 @@ import { createServer } from 'node:net';
 import { probe } from '../lib/daemon.mjs';
 import { buildPayload } from '../lib/payload.mjs';
 import { draftArgs } from '../lib/cli.mjs';
+import { startServer } from '../lib/server.mjs';
 
 const run = promisify(execFile);
 const BIN = new URL('../bin/second-chair', import.meta.url).pathname;
@@ -138,4 +139,27 @@ test('draft takes a pull request and a comments file, and only a body file for a
   assert.deepEqual(draftArgs(['https://github.com/octo-org/example/pull/42'], 'body.md'), { pr: 'https://github.com/octo-org/example/pull/42', file: null });
   assert.deepEqual(draftArgs([], 'body.md'), { pr: undefined, file: null });
   assert.deepEqual(draftArgs([], undefined), { pr: undefined, file: null });
+});
+
+test('stop signals nothing when the server on the port is not the one start launched', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  const other = await startServer({ port, root, log: () => {} });
+  const bystander = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
+  try {
+    const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
+    assert.deepEqual(health, { ok: true, tool: 'second-chair', pid: process.pid });
+    await writeFile(join(root, 'server.pid'), String(bystander.pid));
+    const r = await run(process.execPath, [BIN, 'stop'], { env });
+    assert.match(r.stdout, /not the one second-chair start launched/);
+    assert.equal(bystander.exitCode, null);
+    assert.equal(bystander.signalCode, null);
+    assert.equal(await probe(port), true, 'the other server still runs');
+    assert.equal(await readFile(join(root, 'server.pid'), 'utf8').catch(() => 'gone'), 'gone');
+  } finally {
+    bystander.kill();
+    other.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });

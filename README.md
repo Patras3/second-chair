@@ -161,7 +161,7 @@ With the plugin alone, these commands run inside Claude Code. See [Where the com
 | Command | What it does |
 |:--|:--|
 | `second-chair start [--quiet]` | Starts the server in the background, unless one already answers on the port. Writes a pid file and a log to the data directory. |
-| `second-chair stop` | Stops the server that `start` started. |
+| `second-chair stop` | Stops the server that `start` started. It signals nothing when the server on the port has another process id. |
 | `second-chair doctor` | Checks Node, `gh`, the server and the port. Prints the userscript address and what to fix. |
 | `second-chair serve [--port N]` | Runs the server in the foreground. |
 | `second-chair threads [PR]` | Prints the unresolved review threads as JSON. Your own pending comments are left out. |
