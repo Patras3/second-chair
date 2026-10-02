@@ -363,3 +363,26 @@ test('start warns and exits 0 when a server of another version cannot be stopped
     await cleanup(root);
   }
 });
+
+test('several sessions restarting a server of another version at once print no false warning', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  const old = await olderServer({ port, root, pidFile: join(root, 'server.pid') });
+  try {
+    const runs = await Promise.all([1, 2, 3].map(() => run(process.execPath, [BIN, 'start', '--quiet'], { env }).catch((e) => e)));
+    for (const r of runs) {
+      assert.ok(!(r instanceof Error), `every start exits 0: ${r.stderr ?? ''}`);
+      assert.doesNotMatch(r.stdout, /by hand/);
+    }
+    await old.exited;
+    const h = await health(port);
+    assert.equal(h.version, VERSION);
+    assert.equal(Number(await readFile(join(root, 'server.pid'), 'utf8')), h.pid);
+  } finally {
+    old.child.kill();
+    const left = await health(port);
+    if (left && left.pid !== process.pid) process.kill(left.pid);
+    await cleanup(root);
+  }
+});
