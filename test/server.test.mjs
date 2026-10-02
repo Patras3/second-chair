@@ -131,3 +131,15 @@ test('the served userscript points at the port the server runs on', async () => 
   assert.ok(text.includes(`// @updateURL    http://127.0.0.1:${port}/second-chair.user.js`));
   assert.ok(text.includes(`'http://127.0.0.1:${port}'`));
 });
+
+test('published records append per thread and survive a re-read', async () => {
+  await call('PUT', '/api/proposals', proposals({ pr: 30, round: 2, items: [{ thread_id: 'T1', reply_en: 'x' }] }));
+  assert.deepEqual((await call('GET', '/api/published?repo=acme/w&pr=30&round=2')).body, { items: {} });
+  assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 30, round: 2, thread_id: 'T1', action: 'replied', url: 'u1' })).status, 200);
+  const got = (await call('GET', '/api/published?repo=acme/w&pr=30&round=2')).body;
+  assert.equal(got.items.T1.action, 'replied');
+  assert.equal(got.items.T1.url, 'u1');
+  assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 30, round: 2, thread_id: 'T9', action: 'replied' })).status, 409);
+  assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 30, round: '2', thread_id: 'T1', action: 'replied' })).status, 409);
+  assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 30, round: 2, thread_id: 'T1' })).status, 409);
+});
