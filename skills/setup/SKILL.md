@@ -8,7 +8,7 @@ description: Use when the user installs Second Chair, when its cards do not show
 1. Run `second-chair doctor` and show the user its table.
 2. Fix each row that is not ok:
    - node: Node 22 or newer is needed.
-   - gh: run `gh auth login`.
+   - gh: if it is not installed, install it from https://cli.github.com. If it is older than 2.48.0, update it. If it is not logged in, run `gh auth login`.
    - server: run `second-chair start`. If the port is taken, set `SECOND_CHAIR_PORT` and start again.
 3. Browser, once:
    - Install Tampermonkey or Violentmonkey.
