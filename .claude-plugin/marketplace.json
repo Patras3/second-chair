@@ -1,0 +1,7 @@
+{
+  "name": "second-chair",
+  "owner": { "name": "Patras3" },
+  "plugins": [
+    { "name": "second-chair", "source": "./", "description": "AI prepares. You decide. GitHub code review with your coding agent." }
+  ]
+}

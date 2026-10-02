@@ -1,0 +1,10 @@
+{
+  "name": "second-chair",
+  "version": "0.9.0",
+  "description": "AI prepares. You decide. Work through GitHub code reviews with your coding agent. Nothing gets posted without your approval.",
+  "author": { "name": "Patryk Dadas", "url": "https://github.com/Patras3" },
+  "homepage": "https://github.com/Patras3/second-chair",
+  "repository": "https://github.com/Patras3/second-chair",
+  "license": "MIT",
+  "keywords": ["github", "code-review", "pull-request", "human-in-the-loop"]
+}
