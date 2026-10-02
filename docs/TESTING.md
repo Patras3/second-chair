@@ -102,3 +102,77 @@ Use a pull request by another account.
 ### GitHub settings
 
 - [ ] Set the repository's social preview to `docs/images/social-preview.png` (Settings → General → Social preview; GitHub has no API for it).
+
+### Release run 2026-10-02
+
+Run with Claude Code 2.1.288, gh 2.95.0, Node 22.23.1 and Second Chair 1.0.0. The plugin was installed from the GitHub marketplace `Patras3/second-chair` at commit 6a5615e. Every check used that installed copy (`~/.claude/plugins/cache/second-chair/second-chair/1.0.0/bin/second-chair`) and the everyday server on port 7788, unless a row says otherwise. Every GitHub write went to the private `Patras3/second-chair-sandbox`.
+
+No browser with a GitHub login was available. The decisions went to the server the way the userscript sends them: `POST /api/decisions` with the header `X-Second-Chair: 1` and the object that `buildExport` builds. Before each send, `GET /api/proposals?repo=...&pr=...&round=R` returned the pushed proposals.
+
+A result is pass, fail, adapted (the check ran another way, as the row says) or needs the user.
+
+#### Install
+
+| Check | Result |
+| --- | --- |
+| Marketplace add and install | Adapted, pass. The local directory marketplace was removed first. `claude plugin marketplace remove second-chair` also uninstalled the plugin. `claude plugin marketplace add Patras3/second-chair` cloned the private repository over HTTPS. `claude plugin install second-chair@second-chair` installed 1.0.0 at user scope, from commit 6a5615e. The commands ran in a shell, not as `/plugin` in a session. |
+| New session, `doctor` ok | Pass. The server was stopped first. In a headless `claude -p ... --allowedTools Bash` session, `command -v second-chair` found the cache copy, and `doctor` showed `server http://127.0.0.1:7788 ok, version 1.0.0`. The server that the hook started (pid 116541, from the cache copy) still answered after the session exited. |
+| `/second-chair:setup` | Pass. `claude -p '/second-chair:setup' --allowedTools Bash` showed the doctor table and the browser steps: the script manager, Allow user scripts in Chrome or Edge, the userscript address and the pill. |
+| Chrome | Needs the user. |
+| Firefox | Needs the user. |
+
+#### Respond flow
+
+Adapted. Pull request 2 (https://github.com/Patras3/second-chair-sandbox/pull/2, `validate-ttl` into `add-cache`) adds a `ttlMs` check to `src/cache.js`. Its three review threads came from the author's own account, through REST `POST /pulls/2/comments` with `commit_id`, `path`, `line` and `side`, on lines 4, 5 and 3. There is no second account.
+
+| Check | Result |
+| --- | --- |
+| Cards show | Adapted, pass. `threads 2` listed the three threads. `build` and `push` gave 3 items, and `GET /api/proposals` served them with the verdicts fix, pushback and reply. The cards on the page need the user. |
+| Round 1 | Adapted, pass. Sent Fix, Push back and Reply. The Reply text was edited (`reply_edited: true`). `wait`, run in the background, exited 0 and printed the three decisions. |
+| The fix is committed, not pushed | Pass. Commit 854a392 in the scratch clone. The pull request's head stayed d91b3c9 until round 2 was decided. |
+| Round 2 | Adapted, pass. The round 2 head was 854a392, the local commit. Sent Publish, Publish and Hold. The second reply was edited to a text with backticks, double quotes, `$HOME` and a blank line. |
+| Push, `publish`, `close` | Pass. `publish` printed `published 2, kept 0 unchanged, skipped 0 already done` and the replies `#discussion_r4170502352` and `#discussion_r4170502433`. The pull request then had 5 review comments, 2 of them replies. Both bodies equal the approved text byte for byte. The held thread (comment 4170496674) has no reply. A second `publish` printed `published 0, kept 0 unchanged, skipped 2 already done`, and the count stayed at 5. |
+
+#### Review flow
+
+Adapted. Pull request 1 is by the same account. Its old pending review 5397374499 (Patras3, PENDING) was deleted first.
+
+| Check | Result |
+| --- | --- |
+| Start a review by hand | Adapted, pass. REST `POST /pulls/1/reviews` with one comment on line 11, no `event` and no body, like a review started in the UI. Review 5397647973, comment 4170512139. |
+| Review with two findings | Pass. `pending 1` showed the hand-written comment. `draft 1 comments.json`, without `--body-file` because a review existed, added comment 4170513434 (line 4) and 4170513515 (lines 18 to 20). The review then held three comments. The hand-written comment became item `C4170512139` with `origin: "user"` and `original_en`. The card on the page needs the user. |
+| Round 1 | Adapted, pass. Revise with a note on 4170513434, Drop on 4170513515, Post on the hand-written comment, Post on the body. The server refused a Revise with a blank note (`409 thread C4170513434: revise needs a note`) and kept the stored decisions. |
+| Round 2 | Adapted, pass. The revised text follows the note. The dropped comment kept `drop` with `auto: true`. Sent Post on the two comments and Post on the body. `publish` refused, because the review has no body: `GitHub cannot add a body to a pending review that has none. ... Nothing was posted.` This is the documented limit. As the review skill says, round 2 was pushed again with the body set to drop, and sent again. No `--submit`. |
+| After `publish` | Pass after a fix. `publish` printed `BODY: body cleared`, `C4170512139: kept`, `C4170513434: updated` and `C4170513515: dropped`. In REST and in GraphQL, the pending review then held exactly the two approved texts, byte for byte, and 4170513515 was gone. The review is still PENDING, with an empty body. A second run skipped all 4 items. The summary said `published 3`, but GitHub saw two changes: the body was already empty, so nothing was sent for it. Fixed in dffade2, see below. |
+| Body-only `draft` | Pass. On pull request 2, which had no pending review, `pending 2` printed `null`. `draft 2 --body-file body.md` printed `created pending review 5397675516`. `pending 2` showed that body, byte for byte, and no comments. The review was deleted afterwards, so pull request 2 has no pending review. |
+
+#### Cards after the end
+
+All four checks: needs the user. There was no browser on github.com. `npm run smoke` (Playwright Chromium, on a mock pull request page) printed `all ok`. On that page it checks these:
+
+- After the final send, no card stays on the page and the pill reads done.
+- A reload with the server down keeps the cards hidden.
+- A page load with the server up, after `close`, shows no cards.
+- Show cards brings the cards back, read only.
+
+The same checks on github.com need the user.
+
+#### Server
+
+| Check | Result |
+| --- | --- |
+| Foreign pid | Pass. With the server (pid 116541) running, the pid of a `sleep` process went into `server.pid`. `stop` printed `the server on http://127.0.0.1:7788 is not the one second-chair start launched; stopped nothing and removed the stale pid file`. Both processes kept running. |
+| Two sessions at once | Pass. With no server running, two headless `claude -p` sessions started at the same moment. Both printed `/health` with pid 117221, and `server.pid` held 117221. `server.log` shows that the other spawned server exited with `port 7788 is in use`. `stop` stopped the server. |
+| Version update | Adapted, pass. In place of a plugin update, `start` ran from a temporary copy of 1.0.0 with version 0.9.9 in `package.json`. `/health` then showed `0.9.9`, pid 117585. A new headless session restarted it. `/health` showed `1.0.0`, pid 117684, and `server.pid` held 117684. |
+
+In this container, a stopped server stays in `ps` as `<defunct>`, because PID 1 is `sleep infinity` and does not reap orphans. Such a process answers nothing and holds no port.
+
+#### Other systems and GitHub settings
+
+- macOS and Windows: needs the user, on a macOS or a Windows machine.
+- Social preview: needs the user, after the repository is public.
+
+#### Bugs and notes
+
+- Fixed in dffade2: `publish` counted a review body that already had the approved text as a change. In the review flow above, the drop of an empty body printed `body cleared` and counted in `published 3`, but nothing was sent. Such a body now counts as kept, and `publish` sends nothing for it. A unit test covers drop and post. With the fix, a rerun against the same review, on a separate server on port 7799, printed `published 0, kept 3 unchanged` and changed nothing on GitHub.
+- Not changed: `draft` prints a status line before the JSON, so `draft ... > file.json` does not give a valid JSON file. `threads` and `pending` print only JSON. The docs do not say that `draft` prints only JSON.
