@@ -148,9 +148,29 @@ function stateFor(payload, previous) {
       : { decision: null, note: '', reply: it.reply_en ?? '', replyEdited: false };
   }
   // A send answers one publication of the proposals; a new publication needs a new send.
-  const sentAt = sameRound && (previous.payload.published_at ?? null) === (payload.published_at ?? null) ? previous.sentAt ?? null : null;
-  return { payload, decisions, sentAt };
+  const samePublication = sameRound && (previous.payload.published_at ?? null) === (payload.published_at ?? null);
+  const sentAt = samePublication ? previous.sentAt ?? null : null;
+  const doneAt = samePublication ? previous.doneAt ?? null : null;
+  return { payload, decisions, sentAt, doneAt };
 }
+
+/** Why and since when this pull request's triage is over, or null while it is open. */
+function doneInfo(state) {
+  if (!state) return null;
+  const p = state.payload;
+  if (p.closed_at) return { at: p.closed_at, reason: 'closed' };
+  if (state.doneAt) return { at: state.doneAt, reason: 'marked' };
+  if (state.sentAt && p.round === SC_FINAL_ROUND) return { at: state.sentAt, reason: 'final-sent' };
+  return null;
+}
+
+/** A readable local time; a value that is not a date shows as it came. */
+function formatTime(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString();
+}
+
+const SC_DONE_REASON = { closed: 'closed by the agent', 'final-sent': 'final round sent', marked: 'marked as done' };
 
 /** True when the server holds a payload this state has not loaded: a later round, another head, a re-publish or a close. */
 function isNewer(serverPayload, state) {
@@ -272,14 +292,14 @@ function decisionLabel(payload, key) {
 
 /**
  * One thread's card. `where` is 'inline' (under the GitHub thread) or 'panel'. `view` carries what the page
- * remembers per thread: { expanded, editing, hidden } plus `sent`/`closed` for the whole round.
+ * remembers per thread: { expanded, editing, hidden } plus `sent`/`done`/`readOnly` for the whole round.
  */
 function buildCard(state, item, where, view = {}) {
   const p = state.payload;
   const d = state.decisions[item.thread_id];
   const e = effective(state, item);
   const links = threadLinks(p.repo, p.pr, item.comment_id);
-  const compact = !view.expanded && (e.auto || view.sent || view.closed);
+  const compact = !view.expanded && (e.auto || view.sent || view.done);
   const verdict = item.verdict ? `<span class="sc-verdict sc-v-${esc(item.verdict)}">Proposed: ${esc(SC_VERDICT_LABEL[item.verdict] ?? item.verdict)}</span>` : '';
   const badges = [
     e.auto ? '<span class="sc-badge sc-auto">auto</span>' : '',
@@ -296,7 +316,7 @@ function buildCard(state, item, where, view = {}) {
     ? `<a href="#" data-sc-act="jump" data-sc-id="${esc(item.thread_id)}">jump</a> · <a href="${esc(links.files)}">in files</a>`
     : '';
   const expander = `<a href="#" data-sc-act="expand" data-sc-id="${esc(item.thread_id)}">${compact ? 'expand' : 'collapse'}</a>`;
-  const showExpander = e.auto || view.sent || view.closed;
+  const showExpander = e.auto || view.sent || view.done;
   const cls = `sc-card${e.decision ? ' sc-decided' : ''}${compact ? ' sc-compact' : ''}`;
   const open = `<div class="${cls}" data-sc-card="${esc(item.thread_id)}" data-sc-where="${where}">
   <div class="sc-head">${head}<span class="sc-links">${jump}${jump && showExpander ? ' · ' : ''}${showExpander ? expander : ''}</span></div>`;
@@ -317,7 +337,8 @@ function buildCard(state, item, where, view = {}) {
     else if (!e.decision && item.verdict === b.key) bc.push('sc-suggested');
     return `<button type="button" class="${bc.join(' ')}" data-sc-act="decide" data-sc-id="${esc(item.thread_id)}" data-sc-val="${b.key}">${esc(b.label)}</button>`;
   }).join('');
-  const replyBody = view.editing
+  const readOnly = Boolean(view.readOnly);
+  const replyBody = view.editing && !readOnly
     ? `<textarea class="sc-reply" data-sc-field="reply" data-sc-id="${esc(item.thread_id)}" rows="${rowsFor(d.reply, where === 'panel' ? 70 : 110)}">${esc(d.reply)}</textarea>`
     : `<div class="sc-md sc-reply-view">${renderMarkdown(d.reply) || '<span class="sc-empty">Nothing to post.</span>'}</div>`;
   return `${open}
@@ -325,10 +346,12 @@ function buildCard(state, item, where, view = {}) {
   ${context ? `<div class="sc-context"><div class="sc-label">Context — for you</div><div class="sc-md">${renderMarkdown(context)}</div></div>` : ''}
   ${fix ? `<div class="sc-row"><b>How to fix:</b> <span class="sc-md sc-inline-md">${renderMarkdown(fix)}</span></div>` : ''}
   ${commits}
-  <div class="sc-label">${review ? (item.comment_id ? 'Comment to post' : 'Review body') : 'Reply to post'}${d.replyEdited ? ' <span class="sc-edited">(edited)</span>' : ''} <a href="#" class="sc-edit" data-sc-act="edit" data-sc-id="${esc(item.thread_id)}">${view.editing ? 'preview' : 'edit'}</a></div>
+  <div class="sc-label">${review ? (item.comment_id ? 'Comment to post' : 'Review body') : 'Reply to post'}${d.replyEdited ? ' <span class="sc-edited">(edited)</span>' : ''} ${readOnly ? '' : ` <a href="#" class="sc-edit" data-sc-act="edit" data-sc-id="${esc(item.thread_id)}">${view.editing ? 'preview' : 'edit'}</a>`}</div>
   ${replyBody}
-  <div class="sc-buttons">${buttons}</div>
-  <input class="sc-note${needNote ? ' sc-note-needed' : ''}" data-sc-field="note" data-sc-id="${esc(item.thread_id)}" placeholder="${needNote ? 'What should change? Revise needs a note' : 'Note for the agent (optional)'}" value="${esc(d.note)}">
+  ${readOnly
+    ? `<div class="sc-row"><b>Decision:</b> ${esc(decisionLabel(p, e.decision ?? ''))}</div>`
+    : `<div class="sc-buttons">${buttons}</div>
+  <input class="sc-note${needNote ? ' sc-note-needed' : ''}" data-sc-field="note" data-sc-id="${esc(item.thread_id)}" placeholder="${needNote ? 'What should change? Revise needs a note' : 'Note for the agent (optional)'}" value="${esc(d.note)}">`}
 </div>`;
 }
 
@@ -384,6 +407,7 @@ html.sc-shift-wide body{margin-right:50vw!important}
 .sc-msg{padding:8px 12px;font-size:12px;border-bottom:1px solid var(--borderColor-default,#d0d7de)}
 .sc-msg.sc-err{color:var(--fgColor-danger,#d1242f)}
 .sc-banner{padding:8px 12px;border-bottom:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-success-muted,#dafbe1)}
+.sc-banner-done{background:var(--bgColor-done-muted,#fbefff)}
 .sc-paste{margin:8px 12px;width:calc(100% - 24px);min-height:90px;font:12px ui-monospace,monospace}
 .sc-item{border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;margin-bottom:6px}
 .sc-item-head{padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -443,7 +467,7 @@ html.sc-shift-wide body{margin-right:50vw!important}
 .sc-flash{outline:3px solid var(--fgColor-accent,#0969da);outline-offset:2px;transition:outline-color 1.5s}
 `;
 
-function prTriageBootstrap() {
+function secondChairBootstrap() {
   let loc = null;
   let state = null;
   let openId = null;
@@ -455,9 +479,9 @@ function prTriageBootstrap() {
   const editing = new Set();
   const ui = (() => {
     try {
-      return { filter: 'all', wide: false, open: false, showClosed: false, ...JSON.parse(GM_getValue('sc:ui', '{}')) };
+      return { filter: 'all', wide: false, open: false, ...JSON.parse(GM_getValue('sc:ui', '{}')) };
     } catch {
-      return { filter: 'all', wide: false, open: false, showClosed: false };
+      return { filter: 'all', wide: false, open: false };
     }
   })();
   const saveUi = () => GM_setValue('sc:ui', JSON.stringify(ui));
@@ -471,14 +495,16 @@ function prTriageBootstrap() {
     }
   };
   const save = () => GM_setValue(storageKey(loc.repo, loc.number), JSON.stringify(state));
-  const closed = () => Boolean(state?.payload.closed_at);
+  const done = () => Boolean(doneInfo(state));
+  let showDoneCards = false;
   const itemById = (id) => state.payload.items.find((x) => x.thread_id === id);
   const viewOf = (it) => ({
     expanded: expanded.has(it.thread_id),
     editing: editing.has(it.thread_id),
     hidden: Boolean(it.comment_id) && !anchorFor(it),
     sent: Boolean(state.sentAt),
-    closed: closed(),
+    done: done(),
+    readOnly: done(),
   });
 
   /** Resolves { status, body } from the local server; rejects when it is not running. */
@@ -548,7 +574,7 @@ function prTriageBootstrap() {
     const listEl = panel.querySelector('.sc-list');
     const scrollTop = listEl ? listEl.scrollTop : 0;
     const pr = state ? progress(state) : null;
-    toggle.textContent = !pr ? 'SC' : closed() ? `SC r${state.payload.round} ✓ closed` : `SC r${state.payload.round} · ${pr.done}/${pr.total}`;
+    toggle.textContent = !pr ? 'SC' : done() ? 'SC ✓ done' : `SC r${state.payload.round} · ${pr.done}/${pr.total}`;
     toggle.classList.toggle('sc-complete', Boolean(pr && pr.complete));
     const title = state ? `#${state.payload.pr}${modeOf(state.payload) === 'review' ? ' review' : ''} round ${state.payload.round}${state.payload.head ? ` @ ${String(state.payload.head).slice(0, 8)}` : ''}` : 'No proposals';
     const server = serverUp === null ? '' : `<span class="sc-server ${serverUp ? 'sc-up' : 'sc-down'}" title="${SC_SERVER}">server ${serverUp ? 'on' : 'off'}</span>`;
@@ -558,10 +584,12 @@ function prTriageBootstrap() {
   <div class="sc-bar">
   <button type="button" data-sc-act="fetch" ${serverUp ? '' : 'disabled'}>Load from server</button>
   <button type="button" data-sc-act="import">Load from clipboard</button>
-  <button type="button" data-sc-act="export" ${pr && pr.complete && !closed() ? '' : 'disabled'} title="${pr && !pr.complete ? `${pr.total - pr.done} left` : ''}">Send decisions</button>
+  ${done() ? '' : `<button type="button" data-sc-act="export" ${pr && pr.complete ? '' : 'disabled'} title="${pr && !pr.complete ? `${pr.total - pr.done} left` : ''}">Send decisions</button>`}
+  ${state && !done() ? '<button type="button" data-sc-act="markdone">Mark as done</button>' : ''}
   ${state ? '<button type="button" data-sc-act="clear">Clear</button>' : ''}</div>`;
     let banner = '';
-    if (closed()) banner = `<div class="sc-banner">This round is closed (${esc(state.payload.closed_at)}). Cards are hidden on the page. <a href="#" data-sc-act="showclosed">${ui.showClosed ? 'Hide them' : 'Show them anyway'}</a></div>`;
+    const info = doneInfo(state);
+    if (info) banner = `<div class="sc-banner sc-banner-done"><b>Done</b> · ${esc(SC_DONE_REASON[info.reason])} ${esc(formatTime(info.at))}. Cards are hidden on the page. <a href="#" data-sc-act="showdone">${showDoneCards ? 'Hide cards' : 'Show cards on the page'}</a></div>`;
     else if (state?.sentAt) banner = `<div class="sc-banner">Decisions sent ${esc(state.sentAt)}. The agent picks them up from the server; the next round loads here.</div>`;
     let tools = '';
     if (state) {
@@ -581,10 +609,10 @@ function prTriageBootstrap() {
   function updateProgress(id) {
     const pr = progress(state);
     const toggle = document.querySelector('.sc-toggle');
-    if (toggle && !closed()) toggle.textContent = `SC r${state.payload.round} · ${pr.done}/${pr.total}`;
+    if (toggle && !done()) toggle.textContent = `SC r${state.payload.round} · ${pr.done}/${pr.total}`;
     toggle?.classList.toggle('sc-complete', pr.complete);
     const send = document.querySelector('.sc-panel [data-sc-act=export]');
-    if (send) send.disabled = !(pr.complete && !closed());
+    if (send) send.disabled = !(pr.complete && !done());
     const needed = missingNote(state, itemById(id));
     document.querySelectorAll(`.sc-note[data-sc-id="${CSS.escape(id)}"]`).forEach((n) => n.classList.toggle('sc-note-needed', needed));
   }
@@ -595,7 +623,7 @@ function prTriageBootstrap() {
   }
 
   const inlineCard = (id) => document.querySelector(`.sc-card[data-sc-where=inline][data-sc-card="${CSS.escape(id)}"]`);
-  const showInline = () => Boolean(state) && (!closed() || ui.showClosed);
+  const showInline = () => Boolean(state) && (!done() || showDoneCards);
 
   function cardElement(it) {
     const holder = document.createElement('div');
@@ -651,11 +679,11 @@ function prTriageBootstrap() {
     } else if (res.payload.repo !== loc.repo || res.payload.pr !== loc.number) {
       message = { error: true, text: `These proposals are for ${res.payload.repo}#${res.payload.pr}, and this page is ${loc.repo}#${loc.number}.`, showPaste: true };
     } else {
-      const wasClosed = closed();
+      const wasDone = done();
       state = stateFor(res.payload, state);
       save();
-      if (closed() && !wasClosed) ui.showClosed = false;
-      message = { text: closed() ? 'This round is closed.' : `Loaded ${res.payload.items.length} ${modeOf(res.payload) === 'review' ? 'review comments' : 'threads'}, round ${res.payload.round}, from the ${source}.` };
+      if (done() && !wasDone) showDoneCards = false;
+      message = { text: done() ? 'This triage is done.' : `Loaded ${res.payload.items.length} ${modeOf(res.payload) === 'review' ? 'review comments' : 'threads'}, round ${res.payload.round}, from the ${source}.` };
     }
     renderAll(true);
   }
@@ -694,6 +722,9 @@ function prTriageBootstrap() {
       message = { error: true, text: `The server refused the decisions (${r.status}: ${r.body?.error ?? 'no reason'}). They are on the clipboard instead.` };
     } catch {
       serverUp = false;
+      // An offline final send also ends the triage.
+      state.sentAt = out.exported_at;
+      save();
       GM_setClipboard(JSON.stringify(out, null, 2), 'text');
       message = { text: 'The server is not running, so the decisions are on the clipboard. Paste them to the agent.' };
     }
@@ -790,9 +821,22 @@ function prTriageBootstrap() {
       renderPanel();
     } else if (act === 'prev' || act === 'next') {
       move(act === 'next' ? 1 : -1);
-    } else if (act === 'showclosed') {
-      ui.showClosed = !ui.showClosed;
-      saveUi();
+    } else if (act === 'markdone') {
+      if (!confirm('Mark this pull request as done? Its cards leave the page.')) return;
+      const now = new Date().toISOString();
+      try {
+        const r = await api('POST', '/api/close', { repo: loc.repo, pr: loc.number });
+        if (r.status !== 200) throw new Error(r.body?.error ?? String(r.status));
+        state.payload.closed_at = r.body.closed_at;
+        message = null;
+      } catch (err) {
+        state.doneAt = now;
+        message = { text: `Marked as done in this browser. The server did not record it (${err.message}).` };
+      }
+      save();
+      renderAll(true);
+    } else if (act === 'showdone') {
+      showDoneCards = !showDoneCards;
       renderAll(true);
     } else if (act === 'fetch') {
       sync(true);
@@ -903,6 +947,7 @@ function prTriageBootstrap() {
       state = load();
       openId = null;
       message = null;
+      showDoneCards = false;
       expanded.clear();
       editing.clear();
       renderAll(true);
@@ -922,4 +967,4 @@ function prTriageBootstrap() {
   render();
 }
 
-if (typeof document !== 'undefined' && typeof GM_setValue !== 'undefined') prTriageBootstrap();
+if (typeof document !== 'undefined' && typeof GM_setValue !== 'undefined') secondChairBootstrap();

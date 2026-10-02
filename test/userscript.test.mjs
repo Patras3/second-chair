@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
-const { parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
-  new Function(`${source}\nreturn { parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
+const { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
+  new Function(`${source}\nreturn { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
 
 const payload = (over = {}) => ({
   tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc123',
@@ -145,14 +145,14 @@ test('step wraps around and starts at an end when nothing is selected', () => {
   assert.equal(step([], 'x', 1), null);
 });
 
-test('auto and sent cards are compact until expanded; a closed round too', () => {
+test('auto and sent cards are compact until expanded; a finished triage too', () => {
   const s = stateFor(autoPayload(), null);
   const a = s.payload.items[0];
   assert.match(buildCard(s, a, 'inline', {}), /sc-compact/);
   assert.ok(!buildCard(s, a, 'inline', { expanded: true }).includes('sc-compact'));
   assert.ok(!buildCard(s, s.payload.items[1], 'inline', {}).includes('sc-compact'));
   assert.match(buildCard(s, s.payload.items[1], 'inline', { sent: true }), /sc-compact/);
-  assert.match(buildCard(s, s.payload.items[1], 'inline', { closed: true }), /sc-compact/);
+  assert.match(buildCard(s, s.payload.items[1], 'inline', { done: true }), /sc-compact/);
   assert.match(buildCard(s, a, 'inline', { expanded: true }), /sc-btn sc-on-auto" [^>]*data-sc-val="fix"/);
 });
 
@@ -220,4 +220,48 @@ test('review round 2 keeps only Post and Drop, and a reply-mode export says so',
   r.decisions.T1.decision = 'fix';
   r.decisions.G.decision = 'manual';
   assert.equal(buildExport(r, 'now').mode, 'reply');
+});
+
+test('a triage is done when closed, when the final round was sent, or when marked done', () => {
+  const r1 = stateFor(payload({ published_at: 't1' }), null);
+  assert.equal(doneInfo(r1), null);
+  r1.sentAt = 's1';
+  assert.equal(doneInfo(r1), null, 'sending round 1 is not the end');
+  const r2 = stateFor(payload({ round: 2, published_at: 't2' }), null);
+  r2.sentAt = 's2';
+  assert.deepEqual(doneInfo(r2), { at: 's2', reason: 'final-sent' });
+  const closed = stateFor(payload({ published_at: 't1', closed_at: 'c1' }), null);
+  assert.deepEqual(doneInfo(closed), { at: 'c1', reason: 'closed' });
+  const marked = stateFor(payload({ published_at: 't1' }), null);
+  marked.doneAt = 'm1';
+  assert.deepEqual(doneInfo(marked), { at: 'm1', reason: 'marked' });
+  const review2 = stateFor(review({ round: 2, published_at: 't3' }), null);
+  review2.sentAt = 's3';
+  assert.equal(doneInfo(review2).reason, 'final-sent');
+});
+
+test('a new publication reopens a finished triage', () => {
+  const s = stateFor(payload({ round: 2, published_at: 't2' }), null);
+  s.sentAt = 's2';
+  s.doneAt = 'm2';
+  assert.equal(stateFor(payload({ round: 2, published_at: 't2' }), s).doneAt, 'm2', 'the same publication keeps the mark');
+  const next = stateFor(payload({ round: 1, published_at: 't9' }), s);
+  assert.equal(next.doneAt, null);
+  assert.equal(next.sentAt, null);
+  assert.equal(doneInfo(next), null);
+});
+
+test('a read-only card has no buttons, no editor and no note', () => {
+  const s = stateFor(payload(), null);
+  s.decisions.T1.decision = 'fix';
+  const html = buildCard(s, s.payload.items[0], 'inline', { readOnly: true, expanded: true });
+  assert.ok(!html.includes('data-sc-act="decide"'));
+  assert.ok(!html.includes('data-sc-field="note"'));
+  assert.ok(!html.includes('data-sc-act="edit"'));
+  assert.ok(html.includes('Will do.'));
+});
+
+test('a stored state whose final round was sent stays done without the server', () => {
+  const stored = JSON.parse(JSON.stringify({ ...stateFor(payload({ round: 2, published_at: 't2' }), null), sentAt: 's2' }));
+  assert.equal(doneInfo(stored).reason, 'final-sent');
 });

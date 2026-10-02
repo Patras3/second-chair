@@ -153,14 +153,38 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check(await page.locator(`${card('T2')}.sc-compact`).count() === 1, 'after sending, the cards are compact');
   await page.screenshot({ path: path.join(__dirname, 'smoke.png') });
 
+  const storedR1 = await page.evaluate(() => JSON.stringify(window.__store));
+
+  // Round 2 in reply mode: sending the final round ends the triage and takes the cards off the page.
+  await api('PUT', '/api/proposals', { ...payload, round: 2, items: payload.items.map((i) => ({ ...i, verdict: 'publish', auto: false })) });
+  await page.click('[data-sc-act=fetch]');
+  await page.waitForFunction(() => document.querySelector('.sc-toggle').textContent.includes('/6'));
+  for (const id of ['G', 'T1', 'T2', 'T3', 'T4', 'T5']) {
+    await page.click(`.sc-item-head[data-sc-id=${id}]`);
+    await page.click(`${card(id, 'panel')} [data-sc-val=publish]`);
+  }
+  await page.click('[data-sc-act=export]');
+  await page.waitForSelector('.sc-banner-done');
+  check((await page.textContent('.sc-toggle')).includes('✓ done'), 'the pill reads done after the final send');
+  check(await page.locator('.sc-card[data-sc-where=inline]').count() === 0, 'after the final send no card stays on the page');
+  check(await page.locator('[data-sc-act=export], [data-sc-act=markdone]').count() === 0, 'a finished triage has no Send and no Mark as done');
+  const finalStored = await page.evaluate(() => JSON.stringify(window.__store));
+  const reopened = await openPage(browser, 0, finalStored);
+  await reopened.waitForTimeout(500);
+  check(await reopened.locator('.sc-card[data-sc-where=inline]').count() === 0, 'a reload with the server down keeps them hidden');
+  // The panel stays open across reloads, so no click on the pill.
+  await reopened.click('[data-sc-act=showdone]');
+  check(await reopened.locator('.sc-card[data-sc-where=inline]').count() >= 4, 'Show cards brings them back');
+  await reopened.click(`${card('T1')} [data-sc-act=expand]`);
+  check(await reopened.locator(`${card('T1')} [data-sc-act=decide]`).count() === 0 && await reopened.locator(`${card('T1')} [data-sc-field=note]`).count() === 0, 'an expanded card of a finished triage is read only');
+
   await api('POST', '/api/close', { repo: 'acme/w', pr: 7 });
-  const stored = await page.evaluate(() => JSON.stringify(window.__store));
-  const page2 = await openPage(browser, port, stored);
-  await page2.waitForFunction(() => document.querySelector('.sc-toggle').textContent.includes('closed'));
-  check(await page2.locator('.sc-card[data-sc-where=inline]').count() === 0, 'a closed round shows no cards on the page');
-  await page2.click('[data-sc-act=showclosed]');
+  const page2 = await openPage(browser, port, storedR1);
+  await page2.waitForFunction(() => document.querySelector('.sc-toggle').textContent.includes('done'));
+  check(await page2.locator('.sc-card[data-sc-where=inline]').count() === 0, 'a closed triage shows no cards on the page');
+  await page2.click('[data-sc-act=showdone]');
   await page2.waitForSelector('.sc-card[data-sc-where=inline]');
-  check(await page2.locator('.sc-card[data-sc-where=inline].sc-compact').count() >= 4, 'Show them anyway brings them back, compact');
+  check(await page2.locator('.sc-card[data-sc-where=inline].sc-compact').count() >= 4, 'Show cards brings them back, compact');
 
   const r1state = JSON.stringify({ 'sc:acme/w#7': JSON.stringify({ payload, decisions: Object.fromEntries(payload.items.map((i) => [i.thread_id, { decision: 'manual', note: '', reply: '', replyEdited: false }])) }) });
   const offline = await openPage(browser, 0, r1state);
@@ -198,6 +222,12 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   const rgot = await api('GET', '/api/decisions?repo=acme/w&pr=8&round=1');
   const rout = rgot.status === 200 ? JSON.parse(rgot.responseText) : { decisions: [] };
   check(rout.mode === 'review' && rout.decisions.find((d) => d.thread_id === 'C1')?.note === 'say it shorter', 'the review decisions reach the server with the note');
+
+  rv.on('dialog', (d) => d.accept());
+  await rv.click('[data-sc-act=markdone]');
+  await rv.waitForSelector('.sc-banner-done');
+  const closedNow = await api('GET', '/api/proposals?repo=acme/w&pr=8');
+  check(JSON.parse(closedNow.responseText).closed_at, 'Mark as done closes the triage on the server');
 
   await browser.close();
   server.close();
