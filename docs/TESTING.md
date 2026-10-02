@@ -46,3 +46,48 @@ These answers are why the code looks the way it does.
 - A pending review whose body is empty cannot get a body. REST `PUT` on the review and the GraphQL mutation `updatePullRequestReview` both answer `Could not edit a review with a missing body.` This also happens after the body was cleared. Changing or clearing a body that is not empty works. So `draft` rebuilds the review to add a body, and `publish` sends a new body with `--submit`, or refuses without it.
 - While the author has a pending review on a pull request, a reply to a review comment fails with `422 Validation Failed: user_id can only have one pending review per pull request`. `publish` in respond mode now checks for a pending review first and posts nothing while one exists.
 - On an HTTP error gh prints only the status line to stderr, such as `gh: Validation Failed (HTTP 422)`. GitHub's reason is in the JSON on stdout. Error messages from Second Chair now include that reason.
+
+## Release checklist
+
+Walk through this list by hand before a release, on your own test repository. Record the date, the versions and each result here.
+
+### Install
+
+- [ ] In a Claude Code session with no Second Chair installed, run `/plugin marketplace add Patras3/second-chair` and `/plugin install second-chair@second-chair`.
+- [ ] Start a new session. `second-chair doctor` shows the server as ok.
+- [ ] `/second-chair:setup` shows the doctor table and the browser steps that are still missing.
+- [ ] Chrome: install Tampermonkey, turn on **Allow user scripts** (or developer mode), and install the userscript from `http://127.0.0.1:7788/second-chair.user.js`. The **SC** pill shows on a pull request.
+- [ ] Firefox: install a script manager and the userscript. The **SC** pill shows on a pull request.
+
+### Respond flow
+
+Use a pull request of your own with three review threads from another account.
+
+- [ ] `/second-chair:respond <PR>`. The three cards show under their threads.
+- [ ] Round 1: pick **Fix** on the first thread, **Push back** on the second and **Reply** on the third. Send.
+- [ ] The agent commits the fix and does not push.
+- [ ] Round 2: pick **Publish** on the first two threads and **Hold** on the third. Send.
+- [ ] The agent pushes, runs `publish` and `close`. GitHub shows two replies with the exact approved text, and nothing on the held thread.
+
+### Review flow
+
+Use a pull request by another account.
+
+- [ ] In the GitHub UI, start a review and write one comment by hand. Do not submit it.
+- [ ] `/second-chair:review <PR>` with two findings. The pending review now holds three comments, and the hand-written one has a **Your draft comment** card.
+- [ ] Round 1: **Revise** one comment with a note, **Drop** one, **Post** the hand-written one. Send.
+- [ ] Round 2: the revised text follows the note. Send with **Post** on the two that are left.
+- [ ] After `publish`, the pending review on GitHub holds the two comments with the approved texts, and the dropped one is gone. The review is still pending.
+
+### Cards after the end
+
+- [ ] After the final send, no card stays on the page and the pill reads **SC ✓ done**.
+- [ ] After a reload, the cards stay hidden.
+- [ ] Stop the server (`second-chair stop`) and reload. The cards stay hidden.
+- [ ] **Show cards on the page** brings them back, read only.
+
+### Other systems
+
+- [ ] macOS: the server that the session hook started with `second-chair start` keeps running after the session ends.
+- [ ] Windows: the same check.
+- [ ] Windows: `bin/second-chair` starts with a shebang line, so outside Git Bash it runs only as `node bin/second-chair`. Note here how the hook and the command behave in PowerShell and in Git Bash.

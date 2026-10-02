@@ -406,7 +406,7 @@ function buildPanelList(state, openId, filterKey, viewOf) {
     const meta = [esc(it.author ?? 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', v.hidden ? '<span class="sc-hidden">not loaded on page</span>' : '', Array.isArray(it.commits) && it.commits.length ? `commit <code>${esc(it.commits[0])}</code>` : ''].filter(Boolean).join(' · ');
     const open = it.thread_id === openId;
     return `<div class="sc-row${decided ? ' sc-decided' : ''}${open ? ' sc-selected' : ''}" data-sc-item="${esc(it.thread_id)}">
-  <div class="sc-row-main" data-sc-act="toggle" data-sc-id="${esc(it.thread_id)}">${icon}<div class="sc-row-text"><div class="sc-row-sum">${esc(field(it, 'summary') || String(it.reply_en ?? '').split('\n')[0])}</div><div class="sc-row-meta">${meta}</div></div>${label}</div>
+  <div class="sc-row-main" data-sc-act="toggle" data-sc-id="${esc(it.thread_id)}">${icon}<div class="sc-row-text"><div class="sc-row-sum">${richText(field(it, 'summary') || String(it.reply_en ?? '').split('\n')[0])}</div><div class="sc-row-meta">${meta}</div></div>${label}</div>
   ${open && (v.expandedInPanel || v.hidden || !it.comment_id) ? buildCard(state, it, 'panel', { ...v, expanded: true }) : ''}
 </div>`;
   }).join('')}`).join('');

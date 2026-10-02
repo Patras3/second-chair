@@ -10,6 +10,7 @@
   "repository": "github:Patras3/second-chair",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "smoke": "node test/dom-smoke.cjs"
+    "smoke": "node test/dom-smoke.cjs",
+    "screenshots": "node test/screenshots.cjs"
   }
 }
