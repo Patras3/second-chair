@@ -42,3 +42,11 @@ test('a final-round item may not be auto with a verdict that posts', () => {
   assert.equal(proposalsError(p('review', 'drop')), null);
   assert.equal(proposalsError({ ...p('review', 'post'), round: 1 }), null);
 });
+
+test('the package, the plugin and the userscript carry the version of the latest changelog entry', () => {
+  const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+  const latest = /^## (\d+\.\d+\.\d+)$/m.exec(read('CHANGELOG.md'))[1];
+  assert.equal(JSON.parse(read('package.json')).version, latest, 'package.json');
+  assert.equal(JSON.parse(read('.claude-plugin/plugin.json')).version, latest, 'plugin.json');
+  assert.equal(/^\/\/ @version\s+(\S+)$/m.exec(source)[1], latest, 'userscript');
+});

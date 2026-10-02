@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Second Chair
 // @namespace    https://github.com/Patras3/second-chair
-// @version      0.9.0
+// @version      1.0.0
 // @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*
 // @require      https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js
