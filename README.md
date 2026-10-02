@@ -1,4 +1,4 @@
-# PR triage
+# Second Chair
 
 Answer pull request review threads together with a coding agent. The agent reads every thread
 and proposes a verdict, a reply, and a note for you. A Tampermonkey userscript shows each
@@ -10,9 +10,9 @@ texts in a second round.
 
 | Part | What it does |
 |:--|:--|
-| `pr-triage.user.js` | The userscript: cards under every thread, a side panel, decisions |
+| `second-chair.user.js` | The userscript: cards under every thread, a side panel, decisions |
 | `server.mjs` | Local server on `127.0.0.1:7788`: stores proposals and decisions, serves the userscript |
-| `bin/pr-triage` | CLI for the agent: `serve`, `push`, `wait`, `get`, `close`, `status` |
+| `bin/second-chair` | CLI for the agent: `serve`, `push`, `wait`, `get`, `close`, `status` |
 | `build_payload.py` | Wraps proposal arrays into a payload |
 
 No dependencies. The server and the CLI need Node 22 or newer.
@@ -20,8 +20,8 @@ No dependencies. The server and the CLI need Node 22 or newer.
 ## Set up
 
 1. Start the server, either as a systemd user service (`./install-service.sh`) or by hand
-   (`bin/pr-triage serve`).
-2. Open `http://127.0.0.1:7788/pr-triage.user.js` in the browser. Tampermonkey offers to install
+   (`bin/second-chair serve`).
+2. Open `http://127.0.0.1:7788/second-chair.user.js` in the browser. Tampermonkey offers to install
    the script. Updates come from the same URL.
 
 The server listens on `127.0.0.1` only. Every `/api` call needs the `X-PR-Triage: 1` header, and
@@ -33,8 +33,8 @@ write proposals or decisions.
 **Round 1: decide.** The agent pushes proposals:
 
 ```
-bin/pr-triage push payload.json
-bin/pr-triage wait --repo owner/name --pr 214 --round 1     # blocks until you send
+bin/second-chair push payload.json
+bin/second-chair wait --repo owner/name --pr 214 --round 1     # blocks until you send
 ```
 
 Open the pull request, and the cards load from the server. Every card has these parts:
@@ -52,12 +52,12 @@ plain "Done in <sha>" in round 2. An auto item counts as decided with the agent'
 shows as one line. Pick another button to override it, or leave it.
 
 **Send decisions** stays locked until every thread has a decision. It posts the decisions to the
-server, where `pr-triage wait` returns them to the agent. After a send the cards fold to one line.
+server, where `second-chair wait` returns them to the agent. After a send the cards fold to one line.
 
 **Round 2: publish.** The agent makes the fixes, one commit per thread, and does not push yet.
 It then pushes a round 2 payload with the final reply texts and the commits. The buttons are
 **Publish**, **Hold** and **Manual**. After you send, the agent pushes and posts exactly the
-replies marked **Publish**, with the text as you left it, and runs `pr-triage close`. A closed
+replies marked **Publish**, with the text as you left it, and runs `second-chair close`. A closed
 pull request shows no cards; the panel offers to show them anyway.
 
 ## Review mode
@@ -68,7 +68,7 @@ comment plus one general item for the review body:
 
 ```
 build_payload.py --mode review --repo owner/name --pr 282 --round 1 --head <sha> items.json > payload.json
-bin/pr-triage push payload.json
+bin/second-chair push payload.json
 ```
 
 Each card shows the context for you and the comment as it will be posted. The buttons are
@@ -110,7 +110,7 @@ lose them. A new payload for the same round keeps your decisions and edited repl
 ## Payload
 
 ```
-{"tool":"pr-triage","kind":"proposals","repo":"owner/name","pr":214,"round":1,"head":"<sha>",
+{"tool":"second-chair","kind":"proposals","repo":"owner/name","pr":214,"round":1,"head":"<sha>",
  "mode":"reply|review",
  "items":[{"thread_id":"PRRT_…","comment_id":123,"author":"…","path":"…","line":1,
            "summary":"…","verdict":"reply|fix|pushback|manual","context":"…",
@@ -122,7 +122,7 @@ An item with `comment_id: null` is a general item and shows only in the panel. T
 Round 2 verdicts are `publish`, `hold` or `manual`. In review mode they are `post`, `revise` or `drop` in round 1 and `post` or `drop` in round 2; `mode` defaults to `reply`. Every text field is markdown. The page loads
 `marked` and `DOMPurify` from jsDelivr through `@require`; without them it shows plain text.
 
-The server stores files under `~/.local/share/pr-triage/<owner>/<name>/<pr>/` (override with
+The server stores files under `~/.local/share/second-chair/<owner>/<name>/<pr>/` (override with
 `PR_TRIAGE_HOME`). Pushing new proposals for a round deletes that round's decisions, because they
 answer proposals that are gone.
 

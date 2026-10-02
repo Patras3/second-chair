@@ -1,4 +1,4 @@
-// DOM smoke test: a fake PR page, GM_* stubbed, a real pr-triage server, driven by Playwright.
+// DOM smoke test: a fake PR page, GM_* stubbed, a real second-chair server, driven by Playwright.
 // Run: PLAYWRIGHT=/path/to/node_modules/playwright node test/dom-smoke.cjs
 const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
 const fs = require('fs');
@@ -6,11 +6,11 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 
-const script = fs.readFileSync(path.join(__dirname, '..', 'pr-triage.user.js'), 'utf8');
+const script = fs.readFileSync(path.join(__dirname, '..', 'userscript', 'second-chair.user.js'), 'utf8');
 // Tampermonkey loads these through @require; the test loads the same versions from test/vendor.
 const vendor = ['marked.min.js', 'purify.min.js'].map((f) => fs.readFileSync(path.join(__dirname, 'vendor', f), 'utf8'));
 const payload = {
-  tool: 'pr-triage', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc',
+  tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc',
   items: [
     { thread_id: 'G', comment_id: null, verdict: 'manual', summary: 'general item' },
     { thread_id: 'T1', comment_id: 11, author: 'bob', path: 'x/Y.java', line: 3, verdict: 'fix', reply_en: 'Will change it:\n\n- first\n- second', summary: 'S1', context: 'C1 with **bold**' },
@@ -64,84 +64,84 @@ async function openPage(browser, port, store, pr = 7) {
   await page.goto(`https://github.com/acme/w/pull/${pr}`);
   for (const v of vendor) await page.addScriptTag({ content: v });
   await page.addScriptTag({ content: script });
-  await page.waitForSelector('.prt-toggle');
+  await page.waitForSelector('.sc-toggle');
   return page;
 }
 
 const inView = (page, sel) => page.evaluate((s) => { const el = document.querySelector(s); if (!el) return false; const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; }, sel);
-const card = (id, where = 'inline') => `.prt-card[data-prt-where=${where}][data-prt-card=${id}]`;
+const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc-card=${id}]`;
 
 (async () => {
-  const { createHandler, createStore } = await import('../server.mjs');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'prt-smoke-'));
+  const { createHandler, createStore } = await import('../lib/server.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-smoke-'));
   const server = http.createServer();
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
   server.on('request', createHandler({ store: createStore(root), port }));
-  const api = (method, p, body) => nodeRequest(port, { method, url: `http://127.0.0.1:${port}${p}`, headers: { 'Content-Type': 'application/json', 'X-PR-Triage': '1' }, data: body && JSON.stringify(body) });
+  const api = (method, p, body) => nodeRequest(port, { method, url: `http://127.0.0.1:${port}${p}`, headers: { 'Content-Type': 'application/json', 'X-Second-Chair': '1' }, data: body && JSON.stringify(body) });
   await api('PUT', '/api/proposals', payload);
 
   const browser = await chromium.launch();
   const page = await openPage(browser, port);
   await page.waitForSelector(card('T1'));
-  check((await page.locator('.prt-card[data-prt-where=inline]').count()) === 4, 'cards for the four loaded threads; none for the general item or the unloaded one');
-  check((await page.textContent('.prt-toggle')).includes('3/6'), 'the three auto items count as decided');
-  check(await page.locator(`${card('T1')} .prt-reply-view li`).count() === 2, 'the reply renders as markdown');
-  check(await page.locator(`${card('T1')} .prt-context strong`).count() === 1, 'the context renders as markdown');
-  check(await page.locator(`${card('T3')}.prt-compact`).count() === 1, 'an auto card is compact');
+  check((await page.locator('.sc-card[data-sc-where=inline]').count()) === 4, 'cards for the four loaded threads; none for the general item or the unloaded one');
+  check((await page.textContent('.sc-toggle')).includes('3/6'), 'the three auto items count as decided');
+  check(await page.locator(`${card('T1')} .sc-reply-view li`).count() === 2, 'the reply renders as markdown');
+  check(await page.locator(`${card('T1')} .sc-context strong`).count() === 1, 'the context renders as markdown');
+  check(await page.locator(`${card('T3')}.sc-compact`).count() === 1, 'an auto card is compact');
   check((await page.textContent(card('T2'))).includes('S2 legacy field'), 'the older summary_pl field still shows');
 
-  await page.click(`${card('T1')} [data-prt-act=edit]`);
+  await page.click(`${card('T1')} [data-sc-act=edit]`);
   const noScroll = await page.evaluate((s) => { const t = document.querySelector(`${s} textarea`); return t && t.scrollHeight <= t.clientHeight + 4; }, card('T1'));
   check(noScroll, 'the reply editor is tall enough to need no scrolling');
   await page.fill(`${card('T1')} textarea`, 'Edited reply.');
-  await page.click(`${card('T1')} [data-prt-val=fix]`);
-  check((await page.textContent('.prt-toggle')).includes('4/6'), 'a decision from the inline card counts');
+  await page.click(`${card('T1')} [data-sc-val=fix]`);
+  check((await page.textContent('.sc-toggle')).includes('4/6'), 'a decision from the inline card counts');
 
-  await page.click('.prt-toggle');
-  check((await page.textContent('.prt-server')) === 'server on', 'the panel shows the server as on');
+  await page.click('.sc-toggle');
+  check((await page.textContent('.sc-server')) === 'server on', 'the panel shows the server as on');
   check(await page.evaluate(() => getComputedStyle(document.body).marginRight !== '0px'), 'the page narrows next to the panel');
-  await page.click('[data-prt-act=wide]');
-  check(await page.evaluate(() => Math.abs(document.querySelector('.prt-panel').getBoundingClientRect().width - innerWidth / 2) < 2), 'half screen makes the panel half the window wide');
+  await page.click('[data-sc-act=wide]');
+  check(await page.evaluate(() => Math.abs(document.querySelector('.sc-panel').getBoundingClientRect().width - innerWidth / 2) < 2), 'half screen makes the panel half the window wide');
   check(await page.evaluate(() => Math.abs(parseFloat(getComputedStyle(document.body).marginRight) - innerWidth / 2) < 2), 'and the page gives up the same half');
 
-  await page.click('[data-prt-act=filter][data-prt-val=auto]');
-  check((await page.locator('.prt-item').count()) === 3, 'the Auto filter shows the three auto items');
-  await page.click('[data-prt-act=filter][data-prt-val=todo]');
-  check((await page.locator('.prt-item').count()) === 2, 'To decide shows the two undecided ones');
-  await page.click('[data-prt-act=filter][data-prt-val=all]');
+  await page.click('[data-sc-act=filter][data-sc-val=auto]');
+  check((await page.locator('.sc-item').count()) === 3, 'the Auto filter shows the three auto items');
+  await page.click('[data-sc-act=filter][data-sc-val=todo]');
+  check((await page.locator('.sc-item').count()) === 2, 'To decide shows the two undecided ones');
+  await page.click('[data-sc-act=filter][data-sc-val=all]');
 
-  await page.click('.prt-item-head[data-prt-id=T1]');
+  await page.click('.sc-item-head[data-sc-id=T1]');
   await page.waitForTimeout(700);
   check(await inView(page, card('T1')), 'selecting an item scrolls the page to its thread');
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(900);
-  check(await page.locator('.prt-item.prt-open[data-prt-item=T2]').count() === 1 && await inView(page, card('T2')), 'ArrowDown selects the next item and scrolls to it');
+  check(await page.locator('.sc-item.sc-open[data-sc-item=T2]').count() === 1 && await inView(page, card('T2')), 'ArrowDown selects the next item and scrolls to it');
   await page.keyboard.press('j');
   await page.waitForTimeout(900);
   check(await inView(page, card('T3')), 'j moves on as well');
   await page.keyboard.press('j');
   await page.waitForTimeout(1200);
   check(await page.evaluate(() => document.querySelector('details').open) && await inView(page, card('T4')), 'moving to a folded thread unfolds it');
-  await page.click('[data-prt-act=next]');
+  await page.click('[data-sc-act=next]');
   await page.waitForSelector(card('T5'), { timeout: 6000 }).catch(() => {});
   await page.waitForTimeout(900);
   check(await inView(page, card('T5')), 'moving to an unloaded thread clicks Load more and scrolls to it');
   await page.keyboard.press('k');
   await page.waitForTimeout(600);
-  check(await page.locator('.prt-item.prt-open[data-prt-item=T4]').count() === 1, 'k moves back');
+  check(await page.locator('.sc-item.sc-open[data-sc-item=T4]').count() === 1, 'k moves back');
 
-  await page.click('.prt-item-head[data-prt-id=T2]');
-  await page.click(`${card('T2', 'panel')} [data-prt-val=reply]`);
-  await page.click('.prt-item-head[data-prt-id=G]');
-  await page.click(`${card('G', 'panel')} [data-prt-val=manual]`);
-  await page.fill(`${card('G', 'panel')} .prt-note`, 'I will write this one');
-  await page.click('.prt-item-head[data-prt-id=T4]');
-  await page.click(`${card('T4', 'panel')} [data-prt-val=manual]`);
-  check(!(await page.isDisabled('[data-prt-act=export]')), 'send unlocks at 6/6');
+  await page.click('.sc-item-head[data-sc-id=T2]');
+  await page.click(`${card('T2', 'panel')} [data-sc-val=reply]`);
+  await page.click('.sc-item-head[data-sc-id=G]');
+  await page.click(`${card('G', 'panel')} [data-sc-val=manual]`);
+  await page.fill(`${card('G', 'panel')} .sc-note`, 'I will write this one');
+  await page.click('.sc-item-head[data-sc-id=T4]');
+  await page.click(`${card('T4', 'panel')} [data-sc-val=manual]`);
+  check(!(await page.isDisabled('[data-sc-act=export]')), 'send unlocks at 6/6');
 
-  await page.click('[data-prt-act=export]');
-  await page.waitForSelector('.prt-banner');
+  await page.click('[data-sc-act=export]');
+  await page.waitForSelector('.sc-banner');
   const got = await api('GET', '/api/decisions?repo=acme/w&pr=7&round=1');
   const out = got.status === 200 ? JSON.parse(got.responseText) : { decisions: [] };
   const by = Object.fromEntries(out.decisions.map((d) => [d.thread_id, d]));
@@ -150,30 +150,30 @@ const card = (id, where = 'inline') => `.prt-card[data-prt-where=${where}][data-
   check(by.T3?.decision === 'fix' && by.T3.auto === true, 'an untouched auto item goes out as auto');
   check(by.T4?.decision === 'manual' && by.T4.auto === false, 'an overridden auto item goes out as yours');
   check(by.G?.note === 'I will write this one', 'the note reached the server');
-  check(await page.locator(`${card('T2')}.prt-compact`).count() === 1, 'after sending, the cards are compact');
+  check(await page.locator(`${card('T2')}.sc-compact`).count() === 1, 'after sending, the cards are compact');
   await page.screenshot({ path: path.join(__dirname, 'smoke.png') });
 
   await api('POST', '/api/close', { repo: 'acme/w', pr: 7 });
   const stored = await page.evaluate(() => JSON.stringify(window.__store));
   const page2 = await openPage(browser, port, stored);
-  await page2.waitForFunction(() => document.querySelector('.prt-toggle').textContent.includes('closed'));
-  check(await page2.locator('.prt-card[data-prt-where=inline]').count() === 0, 'a closed round shows no cards on the page');
-  await page2.click('[data-prt-act=showclosed]');
-  await page2.waitForSelector('.prt-card[data-prt-where=inline]');
-  check(await page2.locator('.prt-card[data-prt-where=inline].prt-compact').count() >= 4, 'Show them anyway brings them back, compact');
+  await page2.waitForFunction(() => document.querySelector('.sc-toggle').textContent.includes('closed'));
+  check(await page2.locator('.sc-card[data-sc-where=inline]').count() === 0, 'a closed round shows no cards on the page');
+  await page2.click('[data-sc-act=showclosed]');
+  await page2.waitForSelector('.sc-card[data-sc-where=inline]');
+  check(await page2.locator('.sc-card[data-sc-where=inline].sc-compact').count() >= 4, 'Show them anyway brings them back, compact');
 
-  const r1state = JSON.stringify({ 'prt:acme/w#7': JSON.stringify({ payload, decisions: Object.fromEntries(payload.items.map((i) => [i.thread_id, { decision: 'manual', note: '', reply: '', replyEdited: false }])) }) });
+  const r1state = JSON.stringify({ 'sc:acme/w#7': JSON.stringify({ payload, decisions: Object.fromEntries(payload.items.map((i) => [i.thread_id, { decision: 'manual', note: '', reply: '', replyEdited: false }])) }) });
   const offline = await openPage(browser, 0, r1state);
-  await offline.click('.prt-toggle');
-  await offline.waitForSelector('.prt-server.prt-down');
+  await offline.click('.sc-toggle');
+  await offline.waitForSelector('.sc-server.sc-down');
   check(true, 'the panel shows the server as off');
-  await offline.click('[data-prt-act=export]');
+  await offline.click('[data-sc-act=export]');
   await offline.waitForFunction(() => window.__clip);
   check(JSON.parse(await offline.evaluate(() => window.__clip)).decisions.length === 6, 'an offline send puts the decisions on the clipboard');
 
   // Review mode: the comments of a pending review on someone else's PR, decided Post, Revise or Drop.
   await api('PUT', '/api/proposals', {
-    tool: 'pr-triage', kind: 'proposals', mode: 'review', repo: 'acme/w', pr: 8, round: 1, head: 'def',
+    tool: 'second-chair', kind: 'proposals', mode: 'review', repo: 'acme/w', pr: 8, round: 1, head: 'def',
     items: [
       { thread_id: 'BODY', comment_id: null, author: 'review body', verdict: 'post', reply_en: 'Looks good.' },
       { thread_id: 'C1', comment_id: 11, author: 'comment', path: 'docs/a.md', line: 5, verdict: 'post', reply_en: 'A finding.', summary: 'the finding' },
@@ -182,19 +182,19 @@ const card = (id, where = 'inline') => `.prt-card[data-prt-where=${where}][data-
   const rv = await openPage(browser, port, null, 8);
   await rv.waitForSelector(card('C1'));
   check((await rv.textContent(card('C1'))).includes('Comment to post'), 'a review comment card says Comment to post');
-  await rv.click(`${card('C1')} [data-prt-val=revise]`);
-  await rv.click('.prt-toggle');
-  await rv.click('.prt-item-head[data-prt-id=BODY]');
-  await rv.click(`${card('BODY', 'panel')} [data-prt-val=post]`);
-  check(await rv.isDisabled('[data-prt-act=export]'), 'send stays locked while Revise has no note');
-  check(await rv.locator(`${card('C1')} .prt-note.prt-note-needed`).count() === 1, 'the empty note is marked');
-  await rv.click(`${card('C1')} .prt-note`);
+  await rv.click(`${card('C1')} [data-sc-val=revise]`);
+  await rv.click('.sc-toggle');
+  await rv.click('.sc-item-head[data-sc-id=BODY]');
+  await rv.click(`${card('BODY', 'panel')} [data-sc-val=post]`);
+  check(await rv.isDisabled('[data-sc-act=export]'), 'send stays locked while Revise has no note');
+  check(await rv.locator(`${card('C1')} .sc-note.sc-note-needed`).count() === 1, 'the empty note is marked');
+  await rv.click(`${card('C1')} .sc-note`);
   await rv.keyboard.type('say it shorter');
-  check(!(await rv.isDisabled('[data-prt-act=export]')), 'typing the note unlocks send');
-  check(await rv.evaluate(() => document.activeElement?.classList.contains('prt-note')), 'and the note keeps the focus');
-  check(await rv.locator(`${card('C1')} .prt-note.prt-note-needed`).count() === 0, 'the mark goes away');
-  await rv.click('[data-prt-act=export]');
-  await rv.waitForSelector('.prt-banner');
+  check(!(await rv.isDisabled('[data-sc-act=export]')), 'typing the note unlocks send');
+  check(await rv.evaluate(() => document.activeElement?.classList.contains('sc-note')), 'and the note keeps the focus');
+  check(await rv.locator(`${card('C1')} .sc-note.sc-note-needed`).count() === 0, 'the mark goes away');
+  await rv.click('[data-sc-act=export]');
+  await rv.waitForSelector('.sc-banner');
   const rgot = await api('GET', '/api/decisions?repo=acme/w&pr=8&round=1');
   const rout = rgot.status === 200 ? JSON.parse(rgot.responseText) : { decisions: [] };
   check(rout.mode === 'review' && rout.decisions.find((d) => d.thread_id === 'C1')?.note === 'say it shorter', 'the review decisions reach the server with the note');

@@ -1,2 +1,4 @@
-test/smoke.png
 .superpowers/
+node_modules/
+test/smoke.png
+test/out/

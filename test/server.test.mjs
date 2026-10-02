@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, request } from 'node:http';
-import { createHandler, createStore } from '../server.mjs';
+import { createHandler, createStore } from '../lib/server.mjs';
 
 let server;
 let base;
@@ -12,7 +12,7 @@ let root;
 let port;
 
 before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'prt-'));
+  root = await mkdtemp(join(tmpdir(), 'sc-'));
   // Bind first to learn the port, then build the handler that checks Host against it.
   server = createServer();
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -26,18 +26,18 @@ after(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-const H = { 'Content-Type': 'application/json', 'X-PR-Triage': '1' };
+const H = { 'Content-Type': 'application/json', 'X-Second-Chair': '1' };
 const call = async (method, path, body, headers = H) => {
   const r = await fetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   return { status: r.status, body: await r.json().catch(() => null) };
 };
 const proposals = (over = {}) => ({
-  tool: 'pr-triage', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc',
+  tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc',
   items: [{ thread_id: 'T1', verdict: 'fix', reply_en: 'x' }, { thread_id: 'T2', verdict: 'reply', reply_en: 'y' }],
   ...over,
 });
 const decisions = (over = {}) => ({
-  tool: 'pr-triage', kind: 'decisions', repo: 'acme/w', pr: 7, round: 1, head: 'abc',
+  tool: 'second-chair', kind: 'decisions', repo: 'acme/w', pr: 7, round: 1, head: 'abc',
   decisions: [{ thread_id: 'T1', decision: 'fix' }, { thread_id: 'T2', decision: 'manual' }],
   ...over,
 });
@@ -56,7 +56,7 @@ test('a foreign Host header is refused', async () => {
 });
 
 test('the userscript is served for install and update', async () => {
-  const r = await fetch(`${base}/pr-triage.user.js`);
+  const r = await fetch(`${base}/second-chair.user.js`);
   assert.equal(r.status, 200);
   assert.ok((await r.text()).startsWith('// ==UserScript=='));
 });

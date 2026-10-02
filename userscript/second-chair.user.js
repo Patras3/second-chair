@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         PR triage
-// @namespace    pr-triage
-// @version      0.4.0
-// @description  An agent's proposal for every review thread, or for every comment of a draft review, shown next to it on GitHub; your decisions go back to the agent.
+// @name         Second Chair
+// @namespace    https://github.com/Patras3/second-chair
+// @version      0.9.0
+// @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*
 // @require      https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js
 // @require      https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js
@@ -13,27 +13,27 @@
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      localhost
-// @updateURL    http://127.0.0.1:7788/pr-triage.user.js
-// @downloadURL  http://127.0.0.1:7788/pr-triage.user.js
+// @updateURL    http://127.0.0.1:7788/second-chair.user.js
+// @downloadURL  http://127.0.0.1:7788/second-chair.user.js
 // @run-at       document-idle
 // ==/UserScript==
 
-/* PR triage userscript.
+/* Second Chair userscript.
    An agent writes a proposals payload: one item per review thread, round 1 to decide, round 2 to
    publish. In review mode the items are the comments of the agent's pending review on someone
-   else's pull request instead, and you post, revise or drop each one. The script loads it from the local pr-triage server (or from the clipboard), shows a card
+   else's pull request instead, and you post, revise or drop each one. The script loads it from the local second-chair server (or from the clipboard), shows a card
    under every thread, and sends your decisions back once every thread has one. An item the agent
    marks `auto` counts as decided with its proposal until you pick something else. Pure helpers live
    at top level so the test suite can evaluate this file with `new Function`; the DOM bootstrap at
    the bottom runs only in a browser. */
 
-const PRT_TOOL = 'pr-triage';
-const PRT_SERVER = 'http://127.0.0.1:7788';
+const SC_TOOL = 'second-chair';
+const SC_SERVER = 'http://127.0.0.1:7788';
 
 // Decision buttons per mode and round. `reply` answers the threads on your own pull request; `review`
 // decides the comments of a pending review you are about to submit. A decision with `needsNote` counts
 // only once the note says what to change.
-const PRT_DECISIONS = {
+const SC_DECISIONS = {
   reply: {
     1: [
       { key: 'reply', label: 'Reply' },
@@ -60,7 +60,7 @@ const PRT_DECISIONS = {
   },
 };
 
-const PRT_VERDICT_LABEL = { reply: 'reply', fix: 'fix', pushback: 'push back', manual: 'manual', publish: 'publish', hold: 'hold', post: 'post', revise: 'revise', drop: 'drop' };
+const SC_VERDICT_LABEL = { reply: 'reply', fix: 'fix', pushback: 'push back', manual: 'manual', publish: 'publish', hold: 'hold', post: 'post', revise: 'revise', drop: 'drop' };
 
 function modeOf(payload) {
   return payload?.mode ?? 'reply';
@@ -68,7 +68,7 @@ function modeOf(payload) {
 
 /** The decision buttons for a payload's mode and round, or undefined when either is unknown. */
 function decisionsFor(payload) {
-  return PRT_DECISIONS[modeOf(payload)]?.[payload?.round];
+  return SC_DECISIONS[modeOf(payload)]?.[payload?.round];
 }
 
 function esc(s) {
@@ -104,14 +104,14 @@ function parseLocation(pathname) {
 }
 
 function storageKey(repo, number) {
-  return `prt:${repo}#${number}`;
+  return `sc:${repo}#${number}`;
 }
 
 /** Checks a proposals object; returns { payload } or { error } with a message you can act on. */
 function checkPayload(p) {
-  if (!p || p.tool !== PRT_TOOL || p.kind !== 'proposals') return { error: 'Not a pr-triage proposals payload ("tool": "pr-triage", "kind": "proposals").' };
+  if (!p || p.tool !== SC_TOOL || p.kind !== 'proposals') return { error: 'Not a second-chair proposals payload ("tool": "second-chair", "kind": "proposals").' };
   if (!/^[^/]+\/[^/]+$/.test(p.repo ?? '') || !Number.isInteger(p.pr)) return { error: 'Missing "repo" or "pr".' };
-  if (!PRT_DECISIONS[modeOf(p)]) return { error: `Unknown mode: ${p.mode}` };
+  if (!SC_DECISIONS[modeOf(p)]) return { error: `Unknown mode: ${p.mode}` };
   if (!decisionsFor(p)) return { error: `Unknown round: ${p.round}` };
   if (!Array.isArray(p.items) || p.items.length === 0) return { error: 'Missing "items".' };
   const seen = new Set();
@@ -193,7 +193,7 @@ function progress(state) {
   return { done, auto, total: items.length, complete: done === items.length };
 }
 
-const PRT_FILTERS = [
+const SC_FILTERS = [
   { key: 'all', label: 'All', test: () => true },
   { key: 'todo', label: 'To decide', test: (e) => !e.decision },
   { key: 'auto', label: 'Auto', test: (e) => e.auto },
@@ -202,11 +202,11 @@ const PRT_FILTERS = [
 
 /** The filter chips for a round: the fixed ones, then one per decision. */
 function filtersFor(payload) {
-  return [...PRT_FILTERS, ...decisionsFor(payload).map((b) => ({ key: `d:${b.key}`, label: b.label, test: (e) => e.decision === b.key }))];
+  return [...SC_FILTERS, ...decisionsFor(payload).map((b) => ({ key: `d:${b.key}`, label: b.label, test: (e) => e.decision === b.key }))];
 }
 
 function visibleItems(state, filterKey) {
-  const f = filtersFor(state.payload).find((x) => x.key === filterKey) ?? PRT_FILTERS[0];
+  const f = filtersFor(state.payload).find((x) => x.key === filterKey) ?? SC_FILTERS[0];
   return state.payload.items.filter((it) => f.test(effective(state, it)));
 }
 
@@ -223,7 +223,7 @@ function buildExport(state, now) {
   if (!progress(state).complete) return null;
   const p = state.payload;
   return {
-    tool: PRT_TOOL,
+    tool: SC_TOOL,
     kind: 'decisions',
     mode: modeOf(p),
     repo: p.repo,
@@ -279,55 +279,55 @@ function buildCard(state, item, where, view = {}) {
   const e = effective(state, item);
   const links = threadLinks(p.repo, p.pr, item.comment_id);
   const compact = !view.expanded && (e.auto || view.sent || view.closed);
-  const verdict = item.verdict ? `<span class="prt-verdict prt-v-${esc(item.verdict)}">Proposed: ${esc(PRT_VERDICT_LABEL[item.verdict] ?? item.verdict)}</span>` : '';
+  const verdict = item.verdict ? `<span class="sc-verdict sc-v-${esc(item.verdict)}">Proposed: ${esc(SC_VERDICT_LABEL[item.verdict] ?? item.verdict)}</span>` : '';
   const badges = [
-    e.auto ? '<span class="prt-badge prt-auto">auto</span>' : '',
-    view.hidden ? '<span class="prt-badge prt-hidden" title="GitHub has not loaded this thread on the page">hidden</span>' : '',
-    e.decision ? `<span class="prt-done">✓ ${esc(decisionLabel(p, e.decision))}</span>` : '',
+    e.auto ? '<span class="sc-badge sc-auto">auto</span>' : '',
+    view.hidden ? '<span class="sc-badge sc-hidden" title="GitHub has not loaded this thread on the page">hidden</span>' : '',
+    e.decision ? `<span class="sc-done">✓ ${esc(decisionLabel(p, e.decision))}</span>` : '',
   ].join(' ');
   const head = [
-    `<span class="prt-author">${esc(item.author ?? 'general')}</span>`,
-    item.path ? `<code class="prt-path" title="${esc(item.path)}">${esc(shortPath(item.path, item.line))}</code>` : '',
+    `<span class="sc-author">${esc(item.author ?? 'general')}</span>`,
+    item.path ? `<code class="sc-path" title="${esc(item.path)}">${esc(shortPath(item.path, item.line))}</code>` : '',
     verdict,
     badges,
   ].join(' ');
   const jump = where === 'panel' && links
-    ? `<a href="#" data-prt-act="jump" data-prt-id="${esc(item.thread_id)}">jump</a> · <a href="${esc(links.files)}">in files</a>`
+    ? `<a href="#" data-sc-act="jump" data-sc-id="${esc(item.thread_id)}">jump</a> · <a href="${esc(links.files)}">in files</a>`
     : '';
-  const expander = `<a href="#" data-prt-act="expand" data-prt-id="${esc(item.thread_id)}">${compact ? 'expand' : 'collapse'}</a>`;
+  const expander = `<a href="#" data-sc-act="expand" data-sc-id="${esc(item.thread_id)}">${compact ? 'expand' : 'collapse'}</a>`;
   const showExpander = e.auto || view.sent || view.closed;
-  const cls = `prt-card${e.decision ? ' prt-decided' : ''}${compact ? ' prt-compact' : ''}`;
-  const open = `<div class="${cls}" data-prt-card="${esc(item.thread_id)}" data-prt-where="${where}">
-  <div class="prt-head">${head}<span class="prt-links">${jump}${jump && showExpander ? ' · ' : ''}${showExpander ? expander : ''}</span></div>`;
+  const cls = `sc-card${e.decision ? ' sc-decided' : ''}${compact ? ' sc-compact' : ''}`;
+  const open = `<div class="${cls}" data-sc-card="${esc(item.thread_id)}" data-sc-where="${where}">
+  <div class="sc-head">${head}<span class="sc-links">${jump}${jump && showExpander ? ' · ' : ''}${showExpander ? expander : ''}</span></div>`;
   if (compact) {
     const firstLine = String(d.reply || field(item, 'summary')).split('\n').find((l) => l.trim()) ?? '';
-    return `${open}<div class="prt-oneline">${richText(firstLine)}</div></div>`;
+    return `${open}<div class="sc-oneline">${richText(firstLine)}</div></div>`;
   }
   const summary = field(item, 'summary');
   const context = field(item, 'context');
   const fix = field(item, 'fix');
-  const commits = Array.isArray(item.commits) && item.commits.length ? `<div class="prt-row"><b>Commits:</b> ${item.commits.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : '';
+  const commits = Array.isArray(item.commits) && item.commits.length ? `<div class="sc-row"><b>Commits:</b> ${item.commits.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : '';
   const review = modeOf(p) === 'review';
   const needNote = missingNote(state, item);
   const buttons = decisionsFor(p).map((b) => {
-    const bc = ['prt-btn'];
-    if (d.decision === b.key) bc.push('prt-on');
-    else if (e.auto && e.decision === b.key) bc.push('prt-on-auto');
-    else if (!e.decision && item.verdict === b.key) bc.push('prt-suggested');
-    return `<button type="button" class="${bc.join(' ')}" data-prt-act="decide" data-prt-id="${esc(item.thread_id)}" data-prt-val="${b.key}">${esc(b.label)}</button>`;
+    const bc = ['sc-btn'];
+    if (d.decision === b.key) bc.push('sc-on');
+    else if (e.auto && e.decision === b.key) bc.push('sc-on-auto');
+    else if (!e.decision && item.verdict === b.key) bc.push('sc-suggested');
+    return `<button type="button" class="${bc.join(' ')}" data-sc-act="decide" data-sc-id="${esc(item.thread_id)}" data-sc-val="${b.key}">${esc(b.label)}</button>`;
   }).join('');
   const replyBody = view.editing
-    ? `<textarea class="prt-reply" data-prt-field="reply" data-prt-id="${esc(item.thread_id)}" rows="${rowsFor(d.reply, where === 'panel' ? 70 : 110)}">${esc(d.reply)}</textarea>`
-    : `<div class="prt-md prt-reply-view">${renderMarkdown(d.reply) || '<span class="prt-empty">Nothing to post.</span>'}</div>`;
+    ? `<textarea class="sc-reply" data-sc-field="reply" data-sc-id="${esc(item.thread_id)}" rows="${rowsFor(d.reply, where === 'panel' ? 70 : 110)}">${esc(d.reply)}</textarea>`
+    : `<div class="sc-md sc-reply-view">${renderMarkdown(d.reply) || '<span class="sc-empty">Nothing to post.</span>'}</div>`;
   return `${open}
-  ${summary ? `<div class="prt-summary prt-md">${renderMarkdown(summary)}</div>` : ''}
-  ${context ? `<div class="prt-context"><div class="prt-label">Context — for you</div><div class="prt-md">${renderMarkdown(context)}</div></div>` : ''}
-  ${fix ? `<div class="prt-row"><b>How to fix:</b> <span class="prt-md prt-inline-md">${renderMarkdown(fix)}</span></div>` : ''}
+  ${summary ? `<div class="sc-summary sc-md">${renderMarkdown(summary)}</div>` : ''}
+  ${context ? `<div class="sc-context"><div class="sc-label">Context — for you</div><div class="sc-md">${renderMarkdown(context)}</div></div>` : ''}
+  ${fix ? `<div class="sc-row"><b>How to fix:</b> <span class="sc-md sc-inline-md">${renderMarkdown(fix)}</span></div>` : ''}
   ${commits}
-  <div class="prt-label">${review ? (item.comment_id ? 'Comment to post' : 'Review body') : 'Reply to post'}${d.replyEdited ? ' <span class="prt-edited">(edited)</span>' : ''} <a href="#" class="prt-edit" data-prt-act="edit" data-prt-id="${esc(item.thread_id)}">${view.editing ? 'preview' : 'edit'}</a></div>
+  <div class="sc-label">${review ? (item.comment_id ? 'Comment to post' : 'Review body') : 'Reply to post'}${d.replyEdited ? ' <span class="sc-edited">(edited)</span>' : ''} <a href="#" class="sc-edit" data-sc-act="edit" data-sc-id="${esc(item.thread_id)}">${view.editing ? 'preview' : 'edit'}</a></div>
   ${replyBody}
-  <div class="prt-buttons">${buttons}</div>
-  <input class="prt-note${needNote ? ' prt-note-needed' : ''}" data-prt-field="note" data-prt-id="${esc(item.thread_id)}" placeholder="${needNote ? 'What should change? Revise needs a note' : 'Note for the agent (optional)'}" value="${esc(d.note)}">
+  <div class="sc-buttons">${buttons}</div>
+  <input class="sc-note${needNote ? ' sc-note-needed' : ''}" data-sc-field="note" data-sc-id="${esc(item.thread_id)}" placeholder="${needNote ? 'What should change? Revise needs a note' : 'Note for the agent (optional)'}" value="${esc(d.note)}">
 </div>`;
 }
 
@@ -338,13 +338,13 @@ function buildPanelList(state, openId, filterKey, viewOf) {
     const v = viewOf(it);
     const label = e.decision ? `${e.auto ? 'auto: ' : ''}${decisionLabel(p, e.decision)}${missingNote(state, it) ? ' (needs a note)' : ''}` : '—';
     const open = it.thread_id === openId;
-    return `<div class="prt-item${e.decision ? ' prt-decided' : ''}${e.auto ? ' prt-is-auto' : ''}${open ? ' prt-open' : ''}" data-prt-item="${esc(it.thread_id)}">
-  <div class="prt-item-head" data-prt-act="toggle" data-prt-id="${esc(it.thread_id)}">
-    <span class="prt-dot"></span><span class="prt-author">${esc(it.author ?? 'general')}</span>
-    <code class="prt-path">${esc(shortPath(it.path, it.line))}</code>
-    ${v.hidden ? '<span class="prt-badge prt-hidden">hidden</span>' : ''}
-    <span class="prt-item-dec">${esc(label)}</span>
-    <div class="prt-item-sum">${esc(field(it, 'summary'))}</div>
+    return `<div class="sc-item${e.decision ? ' sc-decided' : ''}${e.auto ? ' sc-is-auto' : ''}${open ? ' sc-open' : ''}" data-sc-item="${esc(it.thread_id)}">
+  <div class="sc-item-head" data-sc-act="toggle" data-sc-id="${esc(it.thread_id)}">
+    <span class="sc-dot"></span><span class="sc-author">${esc(it.author ?? 'general')}</span>
+    <code class="sc-path">${esc(shortPath(it.path, it.line))}</code>
+    ${v.hidden ? '<span class="sc-badge sc-hidden">hidden</span>' : ''}
+    <span class="sc-item-dec">${esc(label)}</span>
+    <div class="sc-item-sum">${esc(field(it, 'summary'))}</div>
   </div>
   ${open ? buildCard(state, it, 'panel', { ...v, expanded: true }) : ''}
 </div>`;
@@ -355,91 +355,91 @@ function buildFilterBar(state, filterKey) {
   return filtersFor(state.payload).map((f) => {
     const n = state.payload.items.filter((it) => f.test(effective(state, it))).length;
     if (n === 0 && f.key !== 'all' && f.key !== filterKey) return '';
-    return `<button type="button" class="prt-chip${f.key === filterKey ? ' prt-chip-on' : ''}" data-prt-act="filter" data-prt-val="${f.key}">${esc(f.label)} <b>${n}</b></button>`;
+    return `<button type="button" class="sc-chip${f.key === filterKey ? ' sc-chip-on' : ''}" data-sc-act="filter" data-sc-val="${f.key}">${esc(f.label)} <b>${n}</b></button>`;
   }).join('');
 }
 
-const PRT_CSS = `
-.prt-toggle{position:fixed;right:16px;bottom:16px;z-index:9999;padding:8px 14px;border-radius:20px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);font:600 13px/1.2 -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-.prt-toggle.prt-complete{border-color:var(--fgColor-success,#1a7f37);color:var(--fgColor-success,#1a7f37)}
-.prt-panel{position:fixed;top:0;right:0;bottom:0;width:min(520px,92vw);z-index:9998;display:flex;flex-direction:column;background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);border-left:1px solid var(--borderColor-default,#d0d7de);box-shadow:-4px 0 16px rgba(0,0,0,.15);font:13px/1.55 -apple-system,system-ui,sans-serif}
-.prt-panel.prt-wide{width:50vw}
-.prt-panel[hidden]{display:none}
-html.prt-shift-narrow body{margin-right:min(520px,92vw)!important}
-html.prt-shift-wide body{margin-right:50vw!important}
-.prt-bar{padding:8px 12px;border-bottom:1px solid var(--borderColor-default,#d0d7de);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.prt-bar .prt-title{font-weight:600;margin-right:auto}
-.prt-server{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor}
-.prt-server.prt-up{color:var(--fgColor-success,#1a7f37)}
-.prt-server.prt-down{color:var(--fgColor-muted,#59636e)}
-.prt-bar button,.prt-btn,.prt-chip{padding:3px 10px;border-radius:6px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-muted,#f6f8fa);color:inherit;font:inherit;cursor:pointer}
-.prt-bar button:disabled{opacity:.45;cursor:not-allowed}
-.prt-chip{border-radius:12px;font-size:12px;padding:1px 9px}
-.prt-chip b{font-weight:600;margin-left:2px}
-.prt-chip.prt-chip-on{background:var(--fgColor-accent,#0969da);border-color:var(--fgColor-accent,#0969da);color:#fff}
-.prt-nav{font-size:12px;color:var(--fgColor-muted,#59636e)}
-.prt-nav button{font-size:14px;padding:0 10px}
-.prt-list{overflow:auto;flex:1;padding:8px 10px 60px}
-.prt-msg{padding:8px 12px;font-size:12px;border-bottom:1px solid var(--borderColor-default,#d0d7de)}
-.prt-msg.prt-err{color:var(--fgColor-danger,#d1242f)}
-.prt-banner{padding:8px 12px;border-bottom:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-success-muted,#dafbe1)}
-.prt-paste{margin:8px 12px;width:calc(100% - 24px);min-height:90px;font:12px ui-monospace,monospace}
-.prt-item{border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;margin-bottom:6px}
-.prt-item-head{padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.prt-item-sum{flex-basis:100%;color:var(--fgColor-muted,#59636e);font-size:12px}
-.prt-item-dec{margin-left:auto;font-size:12px;font-weight:600}
-.prt-dot{width:8px;height:8px;border-radius:50%;background:var(--fgColor-attention,#9a6700)}
-.prt-decided .prt-dot{background:var(--fgColor-success,#1a7f37)}
-.prt-is-auto .prt-dot{background:var(--fgColor-muted,#8c959f)}
-.prt-item.prt-open{border-color:var(--fgColor-accent,#0969da);box-shadow:0 0 0 1px var(--fgColor-accent,#0969da)}
-.prt-card{padding:10px 12px;border-top:1px dashed var(--borderColor-default,#d0d7de);font:13px/1.6 -apple-system,system-ui,sans-serif;color:var(--fgColor-default,#1f2328)}
-.prt-card[data-prt-where=inline]{margin:8px 0;border:2px solid var(--fgColor-accent,#0969da);border-radius:6px;background:var(--bgColor-default,#fff)}
-.prt-card[data-prt-where=inline].prt-decided{border-color:var(--fgColor-success,#1a7f37)}
-.prt-card[data-prt-where=inline].prt-compact{border-width:1px;border-style:dashed;padding:6px 10px}
-.prt-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
-.prt-compact .prt-head{margin-bottom:2px}
-.prt-oneline{color:var(--fgColor-muted,#59636e);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.prt-links{margin-left:auto;font-size:12px}
-.prt-author{font-weight:600}
-.prt-path{font-size:11px}
-.prt-verdict,.prt-badge{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor}
-.prt-badge.prt-auto{color:var(--fgColor-muted,#59636e)}
-.prt-badge.prt-hidden{color:var(--fgColor-attention,#9a6700)}
-.prt-v-fix{color:var(--fgColor-accent,#0969da)}
-.prt-v-pushback,.prt-v-hold{color:var(--fgColor-severe,#bc4c00)}
-.prt-v-manual{color:var(--fgColor-danger,#d1242f)}
-.prt-v-reply,.prt-v-publish,.prt-v-post{color:var(--fgColor-success,#1a7f37)}
-.prt-v-revise{color:var(--fgColor-accent,#0969da)}
-.prt-v-drop{color:var(--fgColor-severe,#bc4c00)}
-.prt-note.prt-note-needed{border-color:var(--fgColor-danger,#d1242f)}
-.prt-done{color:var(--fgColor-success,#1a7f37);font-weight:600;font-size:12px}
-.prt-summary{font-weight:600;margin-bottom:6px}
-.prt-context{background:var(--bgColor-attention-muted,#fff8c5);border-left:3px solid var(--fgColor-attention,#9a6700);padding:6px 10px;margin:6px 0;border-radius:4px}
-.prt-label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--fgColor-muted,#59636e);margin:8px 0 3px}
-.prt-label a{text-transform:none;letter-spacing:0;margin-left:6px}
-.prt-context .prt-label{margin-top:0}
-.prt-edited{text-transform:none;color:var(--fgColor-severe,#bc4c00)}
-.prt-row{margin:6px 0}
-.prt-md>:first-child{margin-top:0}.prt-md>:last-child{margin-bottom:0}
-.prt-md p,.prt-md ul,.prt-md ol,.prt-md pre,.prt-md table,.prt-md blockquote{margin:0 0 8px}
-.prt-md ul,.prt-md ol{padding-left:22px}
-.prt-md h1,.prt-md h2,.prt-md h3,.prt-md h4{font-size:14px;margin:10px 0 6px}
-.prt-md table{border-collapse:collapse}
-.prt-md th,.prt-md td{border:1px solid var(--borderColor-default,#d0d7de);padding:2px 8px}
-.prt-md pre{padding:8px;border-radius:6px;background:var(--bgColor-muted,#f6f8fa);overflow:auto}
-.prt-md blockquote{padding-left:10px;border-left:3px solid var(--borderColor-default,#d0d7de);color:var(--fgColor-muted,#59636e)}
-.prt-inline-md,.prt-inline-md>p{display:inline}
-.prt-reply-view{padding:8px 10px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff)}
-.prt-empty{color:var(--fgColor-muted,#59636e);font-style:italic}
-.prt-reply{width:100%;box-sizing:border-box;font:13px/1.5 ui-monospace,SFMono-Regular,monospace;padding:6px;border:1px solid var(--fgColor-accent,#0969da);border-radius:6px;background:var(--bgColor-default,#fff);color:inherit;resize:vertical;overflow:hidden}
-.prt-note{width:100%;box-sizing:border-box;margin-top:6px;padding:4px 6px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff);color:inherit;font:12px -apple-system,system-ui,sans-serif}
-.prt-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.prt-btn.prt-suggested{border-style:dashed;border-color:var(--fgColor-accent,#0969da)}
-.prt-btn.prt-on{background:var(--fgColor-accent,#0969da);border-color:var(--fgColor-accent,#0969da);color:#fff}
-.prt-btn.prt-on-auto{border-color:var(--fgColor-accent,#0969da);color:var(--fgColor-accent,#0969da);font-weight:600}
-.prt-card code,.prt-item code{font-size:11.5px;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
-.prt-md pre code{padding:0;background:none}
-.prt-flash{outline:3px solid var(--fgColor-accent,#0969da);outline-offset:2px;transition:outline-color 1.5s}
+const SC_CSS = `
+.sc-toggle{position:fixed;right:16px;bottom:16px;z-index:9999;padding:8px 14px;border-radius:20px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);font:600 13px/1.2 -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.sc-toggle.sc-complete{border-color:var(--fgColor-success,#1a7f37);color:var(--fgColor-success,#1a7f37)}
+.sc-panel{position:fixed;top:0;right:0;bottom:0;width:min(520px,92vw);z-index:9998;display:flex;flex-direction:column;background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);border-left:1px solid var(--borderColor-default,#d0d7de);box-shadow:-4px 0 16px rgba(0,0,0,.15);font:13px/1.55 -apple-system,system-ui,sans-serif}
+.sc-panel.sc-wide{width:50vw}
+.sc-panel[hidden]{display:none}
+html.sc-shift-narrow body{margin-right:min(520px,92vw)!important}
+html.sc-shift-wide body{margin-right:50vw!important}
+.sc-bar{padding:8px 12px;border-bottom:1px solid var(--borderColor-default,#d0d7de);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sc-bar .sc-title{font-weight:600;margin-right:auto}
+.sc-server{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor}
+.sc-server.sc-up{color:var(--fgColor-success,#1a7f37)}
+.sc-server.sc-down{color:var(--fgColor-muted,#59636e)}
+.sc-bar button,.sc-btn,.sc-chip{padding:3px 10px;border-radius:6px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-muted,#f6f8fa);color:inherit;font:inherit;cursor:pointer}
+.sc-bar button:disabled{opacity:.45;cursor:not-allowed}
+.sc-chip{border-radius:12px;font-size:12px;padding:1px 9px}
+.sc-chip b{font-weight:600;margin-left:2px}
+.sc-chip.sc-chip-on{background:var(--fgColor-accent,#0969da);border-color:var(--fgColor-accent,#0969da);color:#fff}
+.sc-nav{font-size:12px;color:var(--fgColor-muted,#59636e)}
+.sc-nav button{font-size:14px;padding:0 10px}
+.sc-list{overflow:auto;flex:1;padding:8px 10px 60px}
+.sc-msg{padding:8px 12px;font-size:12px;border-bottom:1px solid var(--borderColor-default,#d0d7de)}
+.sc-msg.sc-err{color:var(--fgColor-danger,#d1242f)}
+.sc-banner{padding:8px 12px;border-bottom:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-success-muted,#dafbe1)}
+.sc-paste{margin:8px 12px;width:calc(100% - 24px);min-height:90px;font:12px ui-monospace,monospace}
+.sc-item{border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;margin-bottom:6px}
+.sc-item-head{padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sc-item-sum{flex-basis:100%;color:var(--fgColor-muted,#59636e);font-size:12px}
+.sc-item-dec{margin-left:auto;font-size:12px;font-weight:600}
+.sc-dot{width:8px;height:8px;border-radius:50%;background:var(--fgColor-attention,#9a6700)}
+.sc-decided .sc-dot{background:var(--fgColor-success,#1a7f37)}
+.sc-is-auto .sc-dot{background:var(--fgColor-muted,#8c959f)}
+.sc-item.sc-open{border-color:var(--fgColor-accent,#0969da);box-shadow:0 0 0 1px var(--fgColor-accent,#0969da)}
+.sc-card{padding:10px 12px;border-top:1px dashed var(--borderColor-default,#d0d7de);font:13px/1.6 -apple-system,system-ui,sans-serif;color:var(--fgColor-default,#1f2328)}
+.sc-card[data-sc-where=inline]{margin:8px 0;border:2px solid var(--fgColor-accent,#0969da);border-radius:6px;background:var(--bgColor-default,#fff)}
+.sc-card[data-sc-where=inline].sc-decided{border-color:var(--fgColor-success,#1a7f37)}
+.sc-card[data-sc-where=inline].sc-compact{border-width:1px;border-style:dashed;padding:6px 10px}
+.sc-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
+.sc-compact .sc-head{margin-bottom:2px}
+.sc-oneline{color:var(--fgColor-muted,#59636e);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc-links{margin-left:auto;font-size:12px}
+.sc-author{font-weight:600}
+.sc-path{font-size:11px}
+.sc-verdict,.sc-badge{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor}
+.sc-badge.sc-auto{color:var(--fgColor-muted,#59636e)}
+.sc-badge.sc-hidden{color:var(--fgColor-attention,#9a6700)}
+.sc-v-fix{color:var(--fgColor-accent,#0969da)}
+.sc-v-pushback,.sc-v-hold{color:var(--fgColor-severe,#bc4c00)}
+.sc-v-manual{color:var(--fgColor-danger,#d1242f)}
+.sc-v-reply,.sc-v-publish,.sc-v-post{color:var(--fgColor-success,#1a7f37)}
+.sc-v-revise{color:var(--fgColor-accent,#0969da)}
+.sc-v-drop{color:var(--fgColor-severe,#bc4c00)}
+.sc-note.sc-note-needed{border-color:var(--fgColor-danger,#d1242f)}
+.sc-done{color:var(--fgColor-success,#1a7f37);font-weight:600;font-size:12px}
+.sc-summary{font-weight:600;margin-bottom:6px}
+.sc-context{background:var(--bgColor-attention-muted,#fff8c5);border-left:3px solid var(--fgColor-attention,#9a6700);padding:6px 10px;margin:6px 0;border-radius:4px}
+.sc-label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--fgColor-muted,#59636e);margin:8px 0 3px}
+.sc-label a{text-transform:none;letter-spacing:0;margin-left:6px}
+.sc-context .sc-label{margin-top:0}
+.sc-edited{text-transform:none;color:var(--fgColor-severe,#bc4c00)}
+.sc-row{margin:6px 0}
+.sc-md>:first-child{margin-top:0}.sc-md>:last-child{margin-bottom:0}
+.sc-md p,.sc-md ul,.sc-md ol,.sc-md pre,.sc-md table,.sc-md blockquote{margin:0 0 8px}
+.sc-md ul,.sc-md ol{padding-left:22px}
+.sc-md h1,.sc-md h2,.sc-md h3,.sc-md h4{font-size:14px;margin:10px 0 6px}
+.sc-md table{border-collapse:collapse}
+.sc-md th,.sc-md td{border:1px solid var(--borderColor-default,#d0d7de);padding:2px 8px}
+.sc-md pre{padding:8px;border-radius:6px;background:var(--bgColor-muted,#f6f8fa);overflow:auto}
+.sc-md blockquote{padding-left:10px;border-left:3px solid var(--borderColor-default,#d0d7de);color:var(--fgColor-muted,#59636e)}
+.sc-inline-md,.sc-inline-md>p{display:inline}
+.sc-reply-view{padding:8px 10px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff)}
+.sc-empty{color:var(--fgColor-muted,#59636e);font-style:italic}
+.sc-reply{width:100%;box-sizing:border-box;font:13px/1.5 ui-monospace,SFMono-Regular,monospace;padding:6px;border:1px solid var(--fgColor-accent,#0969da);border-radius:6px;background:var(--bgColor-default,#fff);color:inherit;resize:vertical;overflow:hidden}
+.sc-note{width:100%;box-sizing:border-box;margin-top:6px;padding:4px 6px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff);color:inherit;font:12px -apple-system,system-ui,sans-serif}
+.sc-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.sc-btn.sc-suggested{border-style:dashed;border-color:var(--fgColor-accent,#0969da)}
+.sc-btn.sc-on{background:var(--fgColor-accent,#0969da);border-color:var(--fgColor-accent,#0969da);color:#fff}
+.sc-btn.sc-on-auto{border-color:var(--fgColor-accent,#0969da);color:var(--fgColor-accent,#0969da);font-weight:600}
+.sc-card code,.sc-item code{font-size:11.5px;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
+.sc-md pre code{padding:0;background:none}
+.sc-flash{outline:3px solid var(--fgColor-accent,#0969da);outline-offset:2px;transition:outline-color 1.5s}
 `;
 
 function prTriageBootstrap() {
@@ -454,12 +454,12 @@ function prTriageBootstrap() {
   const editing = new Set();
   const ui = (() => {
     try {
-      return { filter: 'all', wide: false, open: false, showClosed: false, ...JSON.parse(GM_getValue('prt:ui', '{}')) };
+      return { filter: 'all', wide: false, open: false, showClosed: false, ...JSON.parse(GM_getValue('sc:ui', '{}')) };
     } catch {
       return { filter: 'all', wide: false, open: false, showClosed: false };
     }
   })();
-  const saveUi = () => GM_setValue('prt:ui', JSON.stringify(ui));
+  const saveUi = () => GM_setValue('sc:ui', JSON.stringify(ui));
 
   const load = () => {
     const raw = GM_getValue(storageKey(loc.repo, loc.number), null);
@@ -485,9 +485,9 @@ function prTriageBootstrap() {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method,
-        url: `${PRT_SERVER}${path}`,
+        url: `${SC_SERVER}${path}`,
         // The custom header is what the server checks to refuse requests a web page could forge.
-        headers: { 'Content-Type': 'application/json', 'X-PR-Triage': '1' },
+        headers: { 'Content-Type': 'application/json', 'X-Second-Chair': '1' },
         data: body === undefined ? undefined : JSON.stringify(body),
         timeout: 4000,
         onload: (r) => {
@@ -506,86 +506,86 @@ function prTriageBootstrap() {
   }
 
   function ensureShell() {
-    if (!document.getElementById('prt-style')) {
+    if (!document.getElementById('sc-style')) {
       const style = document.createElement('style');
-      style.id = 'prt-style';
-      style.textContent = PRT_CSS;
+      style.id = 'sc-style';
+      style.textContent = SC_CSS;
       document.head.appendChild(style);
     }
-    if (!document.querySelector('.prt-toggle')) {
+    if (!document.querySelector('.sc-toggle')) {
       const toggle = document.createElement('button');
       toggle.type = 'button';
-      toggle.className = 'prt-toggle';
-      toggle.dataset.prtAct = 'panel';
+      toggle.className = 'sc-toggle';
+      toggle.dataset.scAct = 'panel';
       document.body.appendChild(toggle);
       const panel = document.createElement('div');
-      panel.className = 'prt-panel';
+      panel.className = 'sc-panel';
       panel.hidden = !ui.open;
       document.body.appendChild(panel);
     }
   }
 
   function removeShell() {
-    document.querySelectorAll('.prt-toggle, .prt-panel, .prt-card[data-prt-where=inline]').forEach((n) => n.remove());
-    document.documentElement.classList.remove('prt-shift-narrow', 'prt-shift-wide');
+    document.querySelectorAll('.sc-toggle, .sc-panel, .sc-card[data-sc-where=inline]').forEach((n) => n.remove());
+    document.documentElement.classList.remove('sc-shift-narrow', 'sc-shift-wide');
   }
 
   function applyLayout() {
-    const panel = document.querySelector('.prt-panel');
+    const panel = document.querySelector('.sc-panel');
     if (!panel) return;
     panel.hidden = !ui.open;
-    panel.classList.toggle('prt-wide', ui.wide);
+    panel.classList.toggle('sc-wide', ui.wide);
     // The page narrows next to the panel instead of hiding under it.
-    document.documentElement.classList.toggle('prt-shift-narrow', ui.open && !ui.wide);
-    document.documentElement.classList.toggle('prt-shift-wide', ui.open && ui.wide);
+    document.documentElement.classList.toggle('sc-shift-narrow', ui.open && !ui.wide);
+    document.documentElement.classList.toggle('sc-shift-wide', ui.open && ui.wide);
   }
 
   function renderPanel() {
-    const panel = document.querySelector('.prt-panel');
-    const toggle = document.querySelector('.prt-toggle');
+    const panel = document.querySelector('.sc-panel');
+    const toggle = document.querySelector('.sc-toggle');
     if (!panel || !toggle) return;
-    const listEl = panel.querySelector('.prt-list');
+    const listEl = panel.querySelector('.sc-list');
     const scrollTop = listEl ? listEl.scrollTop : 0;
     const pr = state ? progress(state) : null;
-    toggle.textContent = !pr ? 'Triage' : closed() ? `Triage r${state.payload.round} ✓ closed` : `Triage r${state.payload.round} · ${pr.done}/${pr.total}`;
-    toggle.classList.toggle('prt-complete', Boolean(pr && pr.complete));
+    toggle.textContent = !pr ? 'SC' : closed() ? `SC r${state.payload.round} ✓ closed` : `SC r${state.payload.round} · ${pr.done}/${pr.total}`;
+    toggle.classList.toggle('sc-complete', Boolean(pr && pr.complete));
     const title = state ? `#${state.payload.pr}${modeOf(state.payload) === 'review' ? ' review' : ''} round ${state.payload.round}${state.payload.head ? ` @ ${String(state.payload.head).slice(0, 8)}` : ''}` : 'No proposals';
-    const server = serverUp === null ? '' : `<span class="prt-server ${serverUp ? 'prt-up' : 'prt-down'}" title="${PRT_SERVER}">server ${serverUp ? 'on' : 'off'}</span>`;
-    const bar = `<div class="prt-bar"><span class="prt-title">${esc(title)}${pr ? ` — ${pr.done}/${pr.total}${pr.auto ? ` (${pr.auto} auto)` : ''}` : ''}</span>${server}
-  <button type="button" data-prt-act="wide" title="Toggle half-screen width">${ui.wide ? '⇥ narrow' : '⇤ half screen'}</button>
-  <button type="button" data-prt-act="panel">✕</button></div>
-  <div class="prt-bar">
-  <button type="button" data-prt-act="fetch" ${serverUp ? '' : 'disabled'}>Load from server</button>
-  <button type="button" data-prt-act="import">Load from clipboard</button>
-  <button type="button" data-prt-act="export" ${pr && pr.complete && !closed() ? '' : 'disabled'} title="${pr && !pr.complete ? `${pr.total - pr.done} left` : ''}">Send decisions</button>
-  ${state ? '<button type="button" data-prt-act="clear">Clear</button>' : ''}</div>`;
+    const server = serverUp === null ? '' : `<span class="sc-server ${serverUp ? 'sc-up' : 'sc-down'}" title="${SC_SERVER}">server ${serverUp ? 'on' : 'off'}</span>`;
+    const bar = `<div class="sc-bar"><span class="sc-title">${esc(title)}${pr ? ` — ${pr.done}/${pr.total}${pr.auto ? ` (${pr.auto} auto)` : ''}` : ''}</span>${server}
+  <button type="button" data-sc-act="wide" title="Toggle half-screen width">${ui.wide ? '⇥ narrow' : '⇤ half screen'}</button>
+  <button type="button" data-sc-act="panel">✕</button></div>
+  <div class="sc-bar">
+  <button type="button" data-sc-act="fetch" ${serverUp ? '' : 'disabled'}>Load from server</button>
+  <button type="button" data-sc-act="import">Load from clipboard</button>
+  <button type="button" data-sc-act="export" ${pr && pr.complete && !closed() ? '' : 'disabled'} title="${pr && !pr.complete ? `${pr.total - pr.done} left` : ''}">Send decisions</button>
+  ${state ? '<button type="button" data-sc-act="clear">Clear</button>' : ''}</div>`;
     let banner = '';
-    if (closed()) banner = `<div class="prt-banner">This round is closed (${esc(state.payload.closed_at)}). Cards are hidden on the page. <a href="#" data-prt-act="showclosed">${ui.showClosed ? 'Hide them' : 'Show them anyway'}</a></div>`;
-    else if (state?.sentAt) banner = `<div class="prt-banner">Decisions sent ${esc(state.sentAt)}. The agent picks them up from the server; the next round loads here.</div>`;
+    if (closed()) banner = `<div class="sc-banner">This round is closed (${esc(state.payload.closed_at)}). Cards are hidden on the page. <a href="#" data-sc-act="showclosed">${ui.showClosed ? 'Hide them' : 'Show them anyway'}</a></div>`;
+    else if (state?.sentAt) banner = `<div class="sc-banner">Decisions sent ${esc(state.sentAt)}. The agent picks them up from the server; the next round loads here.</div>`;
     let tools = '';
     if (state) {
       const items = visibleItems(state, ui.filter);
       const pos = items.findIndex((it) => it.thread_id === openId);
-      tools = `<div class="prt-bar">${buildFilterBar(state, ui.filter)}</div>
-  <div class="prt-bar prt-nav"><button type="button" data-prt-act="prev" title="Previous (↑ or k)">‹</button><span>${pos < 0 ? '–' : pos + 1} / ${items.length}</span><button type="button" data-prt-act="next" title="Next (↓ or j)">›</button><span>↑/↓ or j/k move · Enter expands</span></div>`;
+      tools = `<div class="sc-bar">${buildFilterBar(state, ui.filter)}</div>
+  <div class="sc-bar sc-nav"><button type="button" data-sc-act="prev" title="Previous (↑ or k)">‹</button><span>${pos < 0 ? '–' : pos + 1} / ${items.length}</span><button type="button" data-sc-act="next" title="Next (↓ or j)">›</button><span>↑/↓ or j/k move · Enter expands</span></div>`;
     }
-    const msg = message ? `<div class="prt-msg${message.error ? ' prt-err' : ''}">${richText(message.text)}</div>` : '';
-    const paste = !state || message?.showPaste ? '<textarea class="prt-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
-    panel.innerHTML = `${bar}${banner}${tools}${msg}${paste}<div class="prt-list">${state ? buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>`;
-    panel.querySelector('.prt-list').scrollTop = scrollTop;
+    const msg = message ? `<div class="sc-msg${message.error ? ' sc-err' : ''}">${richText(message.text)}</div>` : '';
+    const paste = !state || message?.showPaste ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
+    panel.innerHTML = `${bar}${banner}${tools}${msg}${paste}<div class="sc-list">${state ? buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>`;
+    panel.querySelector('.sc-list').scrollTop = scrollTop;
     applyLayout();
   }
 
   /** Updates the counter, the send button and the note markers in place, so typing a note keeps its focus. */
   function updateProgress(id) {
     const pr = progress(state);
-    const toggle = document.querySelector('.prt-toggle');
-    if (toggle && !closed()) toggle.textContent = `Triage r${state.payload.round} · ${pr.done}/${pr.total}`;
-    toggle?.classList.toggle('prt-complete', pr.complete);
-    const send = document.querySelector('.prt-panel [data-prt-act=export]');
+    const toggle = document.querySelector('.sc-toggle');
+    if (toggle && !closed()) toggle.textContent = `SC r${state.payload.round} · ${pr.done}/${pr.total}`;
+    toggle?.classList.toggle('sc-complete', pr.complete);
+    const send = document.querySelector('.sc-panel [data-sc-act=export]');
     if (send) send.disabled = !(pr.complete && !closed());
     const needed = missingNote(state, itemById(id));
-    document.querySelectorAll(`.prt-note[data-prt-id="${CSS.escape(id)}"]`).forEach((n) => n.classList.toggle('prt-note-needed', needed));
+    document.querySelectorAll(`.sc-note[data-sc-id="${CSS.escape(id)}"]`).forEach((n) => n.classList.toggle('sc-note-needed', needed));
   }
 
   function anchorFor(item) {
@@ -593,7 +593,7 @@ function prTriageBootstrap() {
     return document.getElementById(`discussion_r${item.comment_id}`) || document.getElementById(`r${item.comment_id}`);
   }
 
-  const inlineCard = (id) => document.querySelector(`.prt-card[data-prt-where=inline][data-prt-card="${CSS.escape(id)}"]`);
+  const inlineCard = (id) => document.querySelector(`.sc-card[data-sc-where=inline][data-sc-card="${CSS.escape(id)}"]`);
   const showInline = () => Boolean(state) && (!closed() || ui.showClosed);
 
   function cardElement(it) {
@@ -605,7 +605,7 @@ function prTriageBootstrap() {
   /** Adds the cards that are missing, for threads GitHub loaded since the last pass; leaves the others alone. */
   function renderInline() {
     if (!showInline()) {
-      document.querySelectorAll('.prt-card[data-prt-where=inline]').forEach((n) => n.remove());
+      document.querySelectorAll('.sc-card[data-sc-where=inline]').forEach((n) => n.remove());
       return;
     }
     for (const it of state.payload.items) {
@@ -616,7 +616,7 @@ function prTriageBootstrap() {
   }
 
   function rebuildInline() {
-    document.querySelectorAll('.prt-card[data-prt-where=inline]').forEach((n) => n.remove());
+    document.querySelectorAll('.sc-card[data-sc-where=inline]').forEach((n) => n.remove());
     renderInline();
   }
 
@@ -671,7 +671,7 @@ function prTriageBootstrap() {
     } catch {
       if (here !== loc) return;
       serverUp = false;
-      if (force) message = { error: true, text: `The server at ${PRT_SERVER} is not running. Start it with \`pr-triage serve\`, or load from the clipboard.` };
+      if (force) message = { error: true, text: `The server at ${SC_SERVER} is not running. Start it with \`second-chair serve\`, or load from the clipboard.` };
     }
     renderPanel();
   }
@@ -737,8 +737,8 @@ function prTriageBootstrap() {
     renderInline();
     const target = inlineCard(id) || anchor;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.add('prt-flash');
-    setTimeout(() => target.classList.remove('prt-flash'), 1600);
+    target.classList.add('sc-flash');
+    setTimeout(() => target.classList.remove('sc-flash'), 1600);
     if (message?.error) {
       message = null;
       renderPanel();
@@ -748,7 +748,7 @@ function prTriageBootstrap() {
   function select(id) {
     openId = id;
     renderPanel();
-    const row = document.querySelector(`.prt-item[data-prt-item="${CSS.escape(id)}"]`);
+    const row = document.querySelector(`.sc-item[data-sc-item="${CSS.escape(id)}"]`);
     if (row) row.scrollIntoView({ block: 'nearest' });
     jump(id);
   }
@@ -769,10 +769,10 @@ function prTriageBootstrap() {
   }
 
   document.addEventListener('click', async (e) => {
-    const el = e.target.closest('[data-prt-act]');
+    const el = e.target.closest('[data-sc-act]');
     if (!el) return;
-    const act = el.dataset.prtAct;
-    const id = el.dataset.prtId;
+    const act = el.dataset.scAct;
+    const id = el.dataset.scId;
     if (act !== 'toggle') e.preventDefault();
     if (act === 'panel') {
       ui.open = !ui.open;
@@ -784,7 +784,7 @@ function prTriageBootstrap() {
       saveUi();
       renderPanel();
     } else if (act === 'filter') {
-      ui.filter = el.dataset.prtVal;
+      ui.filter = el.dataset.scVal;
       saveUi();
       renderPanel();
     } else if (act === 'prev' || act === 'next') {
@@ -826,15 +826,15 @@ function prTriageBootstrap() {
       toggleSet(editing, id);
       expanded.add(id);
       refreshThread(id);
-      const where = el.closest('.prt-card')?.dataset.prtWhere;
-      const area = document.querySelector(`.prt-card[data-prt-where="${where}"][data-prt-card="${CSS.escape(id)}"] textarea.prt-reply`);
+      const where = el.closest('.sc-card')?.dataset.scWhere;
+      const area = document.querySelector(`.sc-card[data-sc-where="${where}"][data-sc-card="${CSS.escape(id)}"] textarea.sc-reply`);
       if (area) {
         autosize(area);
         area.focus();
       }
     } else if (act === 'decide') {
       const d = state.decisions[id];
-      d.decision = d.decision === el.dataset.prtVal ? null : el.dataset.prtVal;
+      d.decision = d.decision === el.dataset.scVal ? null : el.dataset.scVal;
       save();
       refreshThread(id);
     }
@@ -858,13 +858,13 @@ function prTriageBootstrap() {
 
   document.addEventListener('input', (e) => {
     const el = e.target;
-    if (el.classList?.contains('prt-paste')) {
+    if (el.classList?.contains('sc-paste')) {
       if (el.value.trim().startsWith('{') && el.value.trim().endsWith('}')) adopt(parsePayload(el.value), 'clipboard');
       return;
     }
-    const name = el.dataset?.prtField;
+    const name = el.dataset?.scField;
     if (!name || !state) return;
-    const id = el.dataset.prtId;
+    const id = el.dataset.scId;
     const d = state.decisions[id];
     if (name === 'reply') {
       d.reply = el.value;
@@ -876,16 +876,16 @@ function prTriageBootstrap() {
     }
     save();
     // Keep the other copy of this card (panel vs inline) in step without stealing focus.
-    document.querySelectorAll(`[data-prt-field="${name}"][data-prt-id="${CSS.escape(id)}"]`).forEach((other) => {
+    document.querySelectorAll(`[data-sc-field="${name}"][data-sc-id="${CSS.escape(id)}"]`).forEach((other) => {
       if (other !== el) other.value = el.value;
     });
   });
 
   function needsRender() {
     const now = parseLocation(location.pathname);
-    if (!now) return Boolean(document.querySelector('.prt-toggle'));
+    if (!now) return Boolean(document.querySelector('.sc-toggle'));
     if (!loc || now.repo !== loc.repo || now.number !== loc.number) return true;
-    if (!document.querySelector('.prt-toggle')) return true;
+    if (!document.querySelector('.sc-toggle')) return true;
     return showInline() && state.payload.items.some((it) => anchorFor(it) && !inlineCard(it.thread_id));
   }
 

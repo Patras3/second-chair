@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
-const source = readFileSync(new URL('../pr-triage.user.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
 const { parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
   new Function(`${source}\nreturn { parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
 
 const payload = (over = {}) => ({
-  tool: 'pr-triage', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc123',
+  tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc123',
   items: [
     { thread_id: 'T1', comment_id: 11, author: 'bob', path: 'a/b/C.java', line: 3, verdict: 'fix', reply_en: 'Will do.', summary: 'change <x>', context_pl: 'checked `foo()`' },
     { thread_id: 'G', comment_id: null, verdict: 'manual', reply_en: '' },
@@ -25,7 +25,7 @@ test('parseLocation takes the PR from every tab of a pull request', () => {
 
 test('parsePayload refuses what is not a proposals payload', () => {
   assert.match(parsePayload('nope').error, /JSON/);
-  assert.match(parsePayload(JSON.stringify({ tool: 'x' })).error, /pr-triage/);
+  assert.match(parsePayload(JSON.stringify({ tool: 'x' })).error, /second-chair/);
   assert.match(parsePayload(JSON.stringify(payload({ round: 3 }))).error, /Unknown round/);
   assert.match(parsePayload(JSON.stringify(payload({ items: [{ thread_id: 'A' }, { thread_id: 'A' }] }))).error, /Duplicate/);
   assert.equal(parsePayload(JSON.stringify(payload())).payload.items.length, 2);
@@ -67,12 +67,12 @@ test('cards escape reviewer text and mark the suggested button', () => {
   const html = buildCard(s, s.payload.items[0], 'inline');
   assert.ok(html.includes('change &lt;x&gt;'));
   assert.ok(html.includes('<code>foo()</code>'));
-  assert.match(html, /prt-btn prt-suggested" [^>]*data-prt-val="fix"/);
+  assert.match(html, /sc-btn sc-suggested" [^>]*data-sc-val="fix"/);
   assert.ok(html.includes('Context — for you'));
   s.decisions.T1.decision = 'reply';
   const decided = buildCard(s, s.payload.items[0], 'panel');
-  assert.match(decided, /prt-btn prt-on" [^>]*data-prt-val="reply"/);
-  assert.ok(!decided.includes('prt-suggested'));
+  assert.match(decided, /sc-btn sc-on" [^>]*data-sc-val="reply"/);
+  assert.ok(!decided.includes('sc-suggested'));
   assert.ok(buildPanelList(s, null, 'all', () => ({})).includes('Reply'));
 });
 
@@ -95,7 +95,7 @@ test('a server payload is newer after a later round, another head, or a re-publi
 });
 
 test('the header grants the server calls and points updates at the local server', () => {
-  for (const line of ['// @grant        GM_xmlhttpRequest', '// @connect      127.0.0.1', '// @updateURL    http://127.0.0.1:7788/pr-triage.user.js']) {
+  for (const line of ['// @grant        GM_xmlhttpRequest', '// @connect      127.0.0.1', '// @updateURL    http://127.0.0.1:7788/second-chair.user.js']) {
     assert.ok(source.includes(line), `header is missing ${line}`);
   }
 });
@@ -131,8 +131,8 @@ test('filters split auto, yours and undecided, and chips show counts', () => {
   assert.deepEqual(ids('d:fix'), ['A']);
   assert.deepEqual(ids('nonsense'), ['A', 'B', 'C']);
   const bar = buildFilterBar(s, 'auto');
-  assert.match(bar, /prt-chip prt-chip-on" data-prt-act="filter" data-prt-val="auto">Auto <b>2<\/b>/);
-  assert.ok(!bar.includes('data-prt-val="mine"'), 'an empty chip is left out');
+  assert.match(bar, /sc-chip sc-chip-on" data-sc-act="filter" data-sc-val="auto">Auto <b>2<\/b>/);
+  assert.ok(!bar.includes('data-sc-val="mine"'), 'an empty chip is left out');
 });
 
 test('step wraps around and starts at an end when nothing is selected', () => {
@@ -148,21 +148,21 @@ test('step wraps around and starts at an end when nothing is selected', () => {
 test('auto and sent cards are compact until expanded; a closed round too', () => {
   const s = stateFor(autoPayload(), null);
   const a = s.payload.items[0];
-  assert.match(buildCard(s, a, 'inline', {}), /prt-compact/);
-  assert.ok(!buildCard(s, a, 'inline', { expanded: true }).includes('prt-compact'));
-  assert.ok(!buildCard(s, s.payload.items[1], 'inline', {}).includes('prt-compact'));
-  assert.match(buildCard(s, s.payload.items[1], 'inline', { sent: true }), /prt-compact/);
-  assert.match(buildCard(s, s.payload.items[1], 'inline', { closed: true }), /prt-compact/);
-  assert.match(buildCard(s, a, 'inline', { expanded: true }), /prt-btn prt-on-auto" [^>]*data-prt-val="fix"/);
+  assert.match(buildCard(s, a, 'inline', {}), /sc-compact/);
+  assert.ok(!buildCard(s, a, 'inline', { expanded: true }).includes('sc-compact'));
+  assert.ok(!buildCard(s, s.payload.items[1], 'inline', {}).includes('sc-compact'));
+  assert.match(buildCard(s, s.payload.items[1], 'inline', { sent: true }), /sc-compact/);
+  assert.match(buildCard(s, s.payload.items[1], 'inline', { closed: true }), /sc-compact/);
+  assert.match(buildCard(s, a, 'inline', { expanded: true }), /sc-btn sc-on-auto" [^>]*data-sc-val="fix"/);
 });
 
 test('the reply shows as a preview, and as a textarea tall enough for its text while editing', () => {
   const s = stateFor(payload(), null);
   s.decisions.T1.reply = 'line one\n\n- a\n- b';
   const view = buildCard(s, s.payload.items[0], 'inline', {});
-  assert.ok(view.includes('prt-reply-view') && !view.includes('<textarea'));
+  assert.ok(view.includes('sc-reply-view') && !view.includes('<textarea'));
   const edit = buildCard(s, s.payload.items[0], 'inline', { editing: true });
-  assert.match(edit, /<textarea class="prt-reply"[^>]* rows="5"/);
+  assert.match(edit, /<textarea class="sc-reply"[^>]* rows="5"/);
   assert.equal(rowsFor('x'.repeat(250), 100), 4);
 });
 
@@ -191,7 +191,7 @@ const review = (over = {}) => payload({
 test('review mode offers Post, Revise and Drop, and labels the text as a comment or the review body', () => {
   const s = stateFor(review(), null);
   const card = buildCard(s, s.payload.items[0], 'inline');
-  assert.deepEqual([...card.matchAll(/data-prt-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'revise', 'drop']);
+  assert.deepEqual([...card.matchAll(/data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'revise', 'drop']);
   assert.ok(card.includes('Comment to post'));
   assert.ok(buildCard(s, s.payload.items[1], 'panel').includes('Review body'));
   assert.match(parsePayload(JSON.stringify(review({ mode: 'other' }))).error, /Unknown mode/);
@@ -204,7 +204,7 @@ test('Revise counts as decided only once its note says what to change', () => {
   s.decisions.BODY.decision = 'post';
   assert.equal(progress(s).complete, false);
   assert.equal(buildExport(s, 'now'), null);
-  assert.ok(buildCard(s, s.payload.items[0], 'inline').includes('prt-note-needed'));
+  assert.ok(buildCard(s, s.payload.items[0], 'inline').includes('sc-note-needed'));
   s.decisions.C1.note = '   ';
   assert.equal(progress(s).complete, false);
   s.decisions.C1.note = 'shorter, no code block';
@@ -215,7 +215,7 @@ test('Revise counts as decided only once its note says what to change', () => {
 
 test('review round 2 keeps only Post and Drop, and a reply-mode export says so', () => {
   const s = stateFor(review({ round: 2 }), null);
-  assert.deepEqual([...buildCard(s, s.payload.items[0], 'inline').matchAll(/data-prt-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'drop']);
+  assert.deepEqual([...buildCard(s, s.payload.items[0], 'inline').matchAll(/data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'drop']);
   const r = stateFor(payload(), null);
   r.decisions.T1.decision = 'fix';
   r.decisions.G.decision = 'manual';

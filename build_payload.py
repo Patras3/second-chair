@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wrap proposal JSON arrays into a pr-triage payload the userscript imports.
+"""Wrap proposal JSON arrays into a second-chair payload the userscript imports.
 
   build_payload.py --repo octo-org/example --pr 214 --round 1 --head <sha> a.json b.json > payload.json
 
@@ -36,7 +36,7 @@ def main() -> int:
         if missing:
             sys.exit(f"{i.get('thread_id')}: missing {missing}")
     items.sort(key=lambda i: 0 if str(i["thread_id"]).startswith("GLOBAL") else 1)
-    payload = {"tool": "pr-triage", "kind": "proposals", "repo": a.repo, "pr": a.pr,
+    payload = {"tool": "second-chair", "kind": "proposals", "repo": a.repo, "pr": a.pr,
                "round": a.round, "head": a.head, "items": items}
     if a.mode != "reply":
         payload["mode"] = a.mode
