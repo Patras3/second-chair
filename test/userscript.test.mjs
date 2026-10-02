@@ -158,6 +158,17 @@ test('an auto flag with a verdict the round does not know stays undecided', () =
   assert.deepEqual(effective(s, s.payload.items[0]), { decision: null, auto: false });
 });
 
+test('auto never decides a posting choice in the final round', () => {
+  const r2 = stateFor(payload({ round: 2, items: [{ thread_id: 'A', verdict: 'publish', auto: true, reply_en: 'x' }, { thread_id: 'B', verdict: 'manual', auto: true, reply_en: '' }] }), null);
+  assert.deepEqual(effective(r2, r2.payload.items[0]), { decision: null, auto: false });
+  assert.deepEqual(effective(r2, r2.payload.items[1]), { decision: 'manual', auto: true });
+  const rv = stateFor(payload({ mode: 'review', round: 2, items: [{ thread_id: 'C1', comment_id: 1, verdict: 'post', auto: true, reply_en: 'x' }, { thread_id: 'C2', comment_id: 2, verdict: 'drop', auto: true, reply_en: 'y' }] }), null);
+  assert.deepEqual(effective(rv, rv.payload.items[0]), { decision: null, auto: false });
+  assert.deepEqual(effective(rv, rv.payload.items[1]), { decision: 'drop', auto: true });
+  const r1 = stateFor(payload({ mode: 'review', round: 1, items: [{ thread_id: 'C1', comment_id: 1, verdict: 'post', auto: true, reply_en: 'x' }] }), null);
+  assert.deepEqual(effective(r1, r1.payload.items[0]), { decision: 'post', auto: true }, 'round 1 posts nothing');
+});
+
 test('filters split auto, yours and undecided', () => {
   const s = stateFor(autoPayload(), null);
   const ids = (f) => visibleItems(s, f).map((i) => i.thread_id);

@@ -86,7 +86,7 @@ The agent writes items, and `second-chair build` wraps them into a proposals pay
 | `context` | string | Markdown for the user only, never posted: what the agent checked and found. |
 | `fix` | string | Markdown: the planned change, for `fix`. The card shows it under the context as "Plan". |
 | `reply_en` | string | Required. Markdown: the reply or comment as it will be posted. For the `BODY` item: the proposed review body. |
-| `auto` | boolean | `true` when the item needs no decision from the user. It counts as decided with its `verdict`, and the card shows one line. The user can still pick another button. |
+| `auto` | boolean | `true` when the item needs no decision from the user. It counts as decided with its `verdict`, and the card shows one line. The user can still pick another button. In round 2, a verdict that posts text (`publish` in `reply` mode, `post` in `review` mode) cannot be `auto`. |
 | `commits` | array of strings | The commits behind the reply, usually in round 2. The card and the panel show them. |
 | `origin` | string | `"agent"` (the default) or `"user"`. `"user"` marks a comment or a review body that the user wrote. Its card says "Your draft comment". |
 | `original_en` | string | For `origin: "user"`: the user's own text. When `reply_en` is a different text, the card shows the original in a folded "Your original" block. |
@@ -101,9 +101,10 @@ Older payloads spell `summary`, `context` and `fix` as `summary_pl`, `context_pl
 - a round 2 item has no `thread_id` or `reply_en`;
 - a `verdict` is not a key of that mode and round;
 - `origin` is neither `agent` nor `user`;
-- two items share a `thread_id`.
+- two items share a `thread_id`;
+- a round 2 item has `auto: true` with the verdict `publish` (`reply` mode) or `post` (`review` mode). The user approves every text that gets posted.
 
-`build` puts the general items first. The server checks less: `tool`, `kind`, `repo`, `pr`, `mode`, `round`, at least one item, and unique `thread_id` values.
+`build` puts the general items first. The server checks less: `tool`, `kind`, `repo`, `pr`, `mode`, `round`, at least one item, unique `thread_id` values and the `auto` rule above. The page also never counts such an item as decided until the user picks a button.
 
 ## Decisions
 

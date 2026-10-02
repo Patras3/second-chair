@@ -33,7 +33,8 @@ const SC_SERVER = 'http://127.0.0.1:7788';
 
 // Decision buttons per mode and round. `reply` answers the threads on your own pull request; `review`
 // decides the comments of a pending review you are about to submit. A decision with `needsNote` counts
-// only once the note says what to change.
+// only once the note says what to change. A decision with `posts` puts text on GitHub, so `auto` never
+// picks it: the user approves every posted text.
 const SC_DECISIONS = {
   reply: {
     1: [
@@ -43,7 +44,7 @@ const SC_DECISIONS = {
       { key: 'manual', label: 'Manual' },
     ],
     2: [
-      { key: 'publish', label: 'Publish' },
+      { key: 'publish', label: 'Publish', posts: true },
       { key: 'hold', label: 'Hold' },
       { key: 'manual', label: 'Manual' },
     ],
@@ -55,7 +56,7 @@ const SC_DECISIONS = {
       { key: 'drop', label: 'Drop' },
     ],
     2: [
-      { key: 'post', label: 'Post' },
+      { key: 'post', label: 'Post', posts: true },
       { key: 'drop', label: 'Drop' },
     ],
   },
@@ -194,11 +195,12 @@ function isNewer(serverPayload, state) {
     || (serverPayload.closed_at ?? null) !== (mine.closed_at ?? null);
 }
 
-/** The decision that counts for an item: yours, or the proposal when the agent marked it `auto`. */
+/** The decision that counts for an item: yours, or the proposal when the agent marked it `auto` and it posts nothing. */
 function effective(state, item) {
   const d = state.decisions[item.thread_id];
   if (d?.decision) return { decision: d.decision, auto: false };
-  if (item.auto && item.verdict && decisionsFor(state.payload).some((b) => b.key === item.verdict)) return { decision: item.verdict, auto: true };
+  const b = item.auto && item.verdict ? decisionsFor(state.payload).find((x) => x.key === item.verdict) : null;
+  if (b && !b.posts) return { decision: item.verdict, auto: true };
   return { decision: null, auto: false };
 }
 

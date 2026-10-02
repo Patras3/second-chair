@@ -122,3 +122,9 @@ test('build wraps items, puts general items first and refuses bad ones', () => {
   assert.equal(r.mode, 'review');
   assert.equal(r.items[0].origin, 'user');
 });
+
+test('build refuses auto on a final-round verdict that posts', () => {
+  assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 2, head: 'h', items: [{ thread_id: 'A', verdict: 'publish', auto: true, reply_en: 'x' }] }), /^Error: A: auto cannot be used with publish in the final round; the user must approve every posted text$/);
+  assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 2, head: 'h', mode: 'review', items: [{ thread_id: 'C1', comment_id: 1, verdict: 'post', auto: true, reply_en: 'x' }] }), /C1: auto cannot be used with post in the final round/);
+  assert.equal(buildPayload({ repo: 'o/n', pr: 1, round: 2, head: 'h', items: [{ thread_id: 'A', verdict: 'manual', auto: true, reply_en: '' }] }).items.length, 1);
+});
