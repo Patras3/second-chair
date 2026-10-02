@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
-const { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
-  new Function(`${source}\nreturn { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
+const { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
+  new Function(`${source}\nreturn { doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
 
 const payload = (over = {}) => ({
   tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc123',
@@ -335,4 +335,10 @@ test('the done banner cannot say who closed it, and the sent note fits both ways
   assert.ok(!/server/.test(sentNote(s)));
   assert.match(sentNote(s), /clipboard/);
   assert.equal(stateFor(payload({ published_at: 'x' }), s).sentVia ?? null, null);
+});
+
+test('moving and counting follow the panel order, not the payload order', () => {
+  const items = [{ thread_id: 'A', path: 'x' }, { thread_id: 'B', path: 'y' }, { thread_id: 'C', path: 'x' }, { thread_id: 'G' }];
+  assert.deepEqual(displayOrder(items).map((i) => i.thread_id), ['G', 'A', 'C', 'B']);
+  assert.equal(step(displayOrder(items), 'A', 1), 'C');
 });

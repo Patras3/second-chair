@@ -238,6 +238,11 @@ function visibleItems(state, filterKey) {
   return state.payload.items.filter((it) => f.test(effective(state, it)));
 }
 
+/** Items in the order the panel shows them: grouped by file, general first. */
+function displayOrder(items) {
+  return groupItems(items).flatMap((g) => g.items);
+}
+
 /** The next or previous item id among `items`, wrapping around; the first one when nothing is selected. */
 function step(items, currentId, delta) {
   if (items.length === 0) return null;
@@ -381,16 +386,23 @@ const SC_ICON = {
   done: (color) => `<svg class="sc-st" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" style="fill:${color}"/><path d="M5 8.2l2 2 4-4.2" style="stroke:#fff;stroke-width:1.6;fill:none"/></svg>`,
 };
 
+/** The status icon and decision label of a panel row, and whether the row counts as decided. */
+function rowParts(state, it, v) {
+  const e = effective(state, it);
+  const needNote = missingNote(state, it);
+  const decided = Boolean(e.decision) && !needNote;
+  const icon = v.done ? SC_ICON.done('var(--fgColor-done,#8250df)') : !decided ? SC_ICON.open : SC_ICON.done(e.auto ? 'var(--fgColor-muted,#8c959f)' : 'var(--fgColor-success,#1a7f37)');
+  const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(state.payload, e.decision))}${needNote ? ' · needs a note' : ''}</span>` : '<span class="sc-muted">—</span>';
+  return { decided, icon, label };
+}
+
 function buildPanelList(state, openId, filterKey, viewOf) {
   const p = state.payload;
   const items = visibleItems(state, filterKey);
   return groupItems(items).map((g) => `<div class="sc-group"><span>${esc(g.label)}</span><span>${g.items.length}</span></div>${g.items.map((it) => {
     const e = effective(state, it);
     const v = viewOf(it);
-    const needNote = missingNote(state, it);
-    const decided = Boolean(e.decision) && !needNote;
-    const icon = v.done ? SC_ICON.done('var(--fgColor-done,#8250df)') : !decided ? SC_ICON.open : SC_ICON.done(e.auto ? 'var(--fgColor-muted,#8c959f)' : 'var(--fgColor-success,#1a7f37)');
-    const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(p, e.decision))}${needNote ? ' · needs a note' : ''}</span>` : '<span class="sc-muted">—</span>';
+    const { decided, icon, label } = rowParts(state, it, v);
     const meta = [esc(it.author ?? 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', v.hidden ? '<span class="sc-hidden">not loaded on page</span>' : '', Array.isArray(it.commits) && it.commits.length ? `commit <code>${esc(it.commits[0])}</code>` : ''].filter(Boolean).join(' · ');
     const open = it.thread_id === openId;
     return `<div class="sc-row${decided ? ' sc-decided' : ''}${open ? ' sc-selected' : ''}" data-sc-item="${esc(it.thread_id)}">
@@ -543,7 +555,7 @@ function secondChairBootstrap() {
     expandedInPanel: expanded.has(it.thread_id),
     editing: editing.has(it.thread_id),
     hidden: Boolean(it.comment_id) && !anchorFor(it),
-    position: `${state.payload.items.indexOf(it) + 1} of ${state.payload.items.length}`,
+    position: `${displayOrder(state.payload.items).indexOf(it) + 1} of ${state.payload.items.length}`,
     sent: Boolean(state.sentAt),
     done: done(),
     readOnly: done(),
@@ -626,7 +638,7 @@ function secondChairBootstrap() {
     <span class="sc-dot ${serverUp ? 'sc-up' : serverUp === false ? 'sc-down' : ''}" title="server ${serverUp ? 'on' : 'off'} · ${SC_SERVER}"></span>
     <button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
   ${pr && !info ? `<div class="sc-progress"><i style="width:${pct(pr.done - pr.auto)}%" class="sc-p-mine"></i><i style="width:${pct(pr.auto)}%" class="sc-p-auto"></i></div>
-  <div class="sc-hrow sc-muted sc-small"><span><b class="sc-fg">${pr.done}</b> of ${pr.total} decided</span>${pr.auto ? `<span>· ${pr.auto} auto</span>` : ''}<span class="sc-grow"></span><span>${pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send'}</span></div>` : ''}
+  <div class="sc-hrow sc-muted sc-small"><span><b class="sc-fg sc-n-done">${pr.done}</b> of ${pr.total} decided</span>${pr.auto ? `<span>· ${pr.auto} auto</span>` : ''}<span class="sc-grow"></span><span class="sc-left">${pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send'}</span></div>` : ''}
 </div>`;
     const menu = menuOpen ? `<div class="sc-menu">
   <a href="#" data-sc-act="fetch">Load from server</a><a href="#" data-sc-act="import">Load from clipboard</a><hr>
@@ -654,8 +666,28 @@ function secondChairBootstrap() {
     if (toggle && !done()) toggle.innerHTML = `<span class="sc-mark">SC</span> ${pr.done}/${pr.total}`;
     toggle?.classList.toggle('sc-complete', pr.complete && !done());
     const send = document.querySelector('.sc-panel [data-sc-act=export]');
-    if (send) send.disabled = !(pr.complete && !done());
-    const needed = missingNote(state, itemById(id));
+    if (send) {
+      send.disabled = !(pr.complete && !done());
+      send.textContent = pr.complete ? 'Send decisions' : `Send decisions · ${pr.total - pr.done} left`;
+    }
+    const bar = (n) => `${pr.total ? (100 * n) / pr.total : 0}%`;
+    const mine = document.querySelector('.sc-panel .sc-p-mine');
+    if (mine) mine.style.width = bar(pr.done - pr.auto);
+    const nDone = document.querySelector('.sc-panel .sc-n-done');
+    if (nDone) nDone.textContent = pr.done;
+    const left = document.querySelector('.sc-panel .sc-left');
+    if (left) left.textContent = pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send';
+    const it = itemById(id);
+    const parts = rowParts(state, it, viewOf(it));
+    const row = document.querySelector(`.sc-row[data-sc-item="${CSS.escape(id)}"]`);
+    if (row) {
+      row.classList.toggle('sc-decided', parts.decided);
+      const main = row.querySelector('.sc-row-main');
+      main.querySelector('.sc-st').outerHTML = parts.icon;
+      main.lastElementChild.outerHTML = parts.label;
+    }
+    document.querySelectorAll(`.sc-card[data-sc-card="${CSS.escape(id)}"]`).forEach((c) => c.classList.toggle('sc-decided', parts.decided));
+    const needed = missingNote(state, it);
     document.querySelectorAll(`.sc-note[data-sc-id="${CSS.escape(id)}"]`).forEach((n) => n.classList.toggle('sc-note-needed', needed));
   }
 
@@ -742,7 +774,7 @@ function secondChairBootstrap() {
     } catch {
       if (here !== loc) return;
       serverUp = false;
-      if (force) message = { error: true, text: `The server at ${SC_SERVER} is not running. Start it with \`second-chair serve\`, or load from the clipboard.` };
+      if (force) message = { error: true, text: `The server at ${SC_SERVER} is not running. Start it with \`second-chair serve\`, or load from the clipboard.`, showPaste: true };
     }
     renderPanel();
   }
@@ -830,7 +862,7 @@ function secondChairBootstrap() {
   }
 
   function move(delta) {
-    const next = step(visibleItems(state, ui.filter), openId, delta);
+    const next = step(displayOrder(visibleItems(state, ui.filter)), openId, delta);
     if (next) select(next);
   }
 

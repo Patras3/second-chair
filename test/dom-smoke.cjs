@@ -236,6 +236,8 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await rv.click(`${card('C1')} .sc-note`);
   await rv.keyboard.type('say it shorter');
   check(!(await rv.isDisabled('[data-sc-act=export]')), 'typing the note unlocks send');
+  check(!/left/.test(await rv.textContent('[data-sc-act=export]')) && !/left/.test(await rv.textContent('.sc-left')), 'and the send label and counters stop saying left');
+  check(!/needs a note/.test(await rv.textContent('.sc-row[data-sc-item=C1]')) && await rv.locator(`${card('C1')}.sc-decided`).count() === 1, 'the row and the inline card update while typing');
   check(await rv.evaluate(() => document.activeElement?.classList.contains('sc-note')), 'and the note keeps the focus');
   check(await rv.locator(`${card('C1')} .sc-note.sc-note-needed`).count() === 0, 'the mark goes away');
   await rv.click('[data-sc-act=export]');
