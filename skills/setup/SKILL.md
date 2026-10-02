@@ -10,6 +10,7 @@ description: Use when the user installs Second Chair, when its cards do not show
    - node: Node 22 or newer is needed.
    - gh: if it is not installed, install it from https://cli.github.com. If it is older than 2.48.0, update it. If it is not logged in, run `gh auth login`.
    - server: run `second-chair start`. If the port is taken, set `SECOND_CHAIR_PORT` and start again.
+     If the server runs another version, `second-chair start` restarts it. When start says to stop it by hand, ask the user to stop that server, then run `second-chair start` again.
 3. Browser, once:
    - Install Tampermonkey or Violentmonkey.
    - Chrome or Edge: open the extension's details page and turn on "Allow user scripts". On older versions turn on developer mode in `chrome://extensions` instead.

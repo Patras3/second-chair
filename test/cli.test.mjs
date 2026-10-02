@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,7 @@ import { draftArgs } from '../lib/cli.mjs';
 import { startServer } from '../lib/server.mjs';
 
 const run = promisify(execFile);
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const BIN = new URL('../bin/second-chair', import.meta.url).pathname;
 
 // On Windows a killed server can hold server.log open a moment longer, so the cleanup retries.
@@ -161,7 +163,7 @@ test('stop signals nothing when the server on the port is not the one start laun
   const bystander = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
   try {
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
-    assert.deepEqual(health, { ok: true, tool: 'second-chair', pid: process.pid });
+    assert.deepEqual(health, { ok: true, tool: 'second-chair', pid: process.pid, version: VERSION });
     await writeFile(join(root, 'server.pid'), String(bystander.pid));
     const r = await run(process.execPath, [BIN, 'stop'], { env });
     assert.match(r.stdout, /not the one second-chair start launched/);
@@ -286,6 +288,77 @@ test('start removes a pid file that does not belong to the server on the port', 
   } finally {
     bystander.kill();
     other.close();
+    await cleanup(root);
+  }
+});
+
+/** A server of another version in its own process, as an older plugin left it running. */
+async function olderServer({ port, root, pidFile, version = '0.9.0' }) {
+  const server = new URL('../lib/server.mjs', import.meta.url).href;
+  const opts = JSON.stringify({ port, root, version, ...(pidFile ? { pidFile } : {}) });
+  const child = spawn(process.execPath, ['-e', `import(${JSON.stringify(server)}).then((m) => m.startServer({ ...${opts}, log: () => {} }))`], { stdio: 'ignore' });
+  const exited = new Promise((r) => child.once('exit', r));
+  await until(async () => (await health(port))?.version === version, 'the older server').catch((e) => {
+    child.kill();
+    throw e;
+  });
+  return { child, exited };
+}
+
+test('start reuses a server of the same version', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  try {
+    await run(process.execPath, [BIN, 'start'], { env });
+    const before = await health(port);
+    assert.equal(before.version, VERSION);
+    const again = await run(process.execPath, [BIN, 'start', '--quiet'], { env });
+    assert.equal(again.stdout, '');
+    assert.equal((await health(port)).pid, before.pid);
+    const doctor = await run(process.execPath, [BIN, 'doctor'], { env }).catch((e) => e);
+    assert.match(doctor.stdout, new RegExp(`server +http://127\\.0\\.0\\.1:${port} ok, version ${VERSION.replace(/\./g, '\\.')}`));
+  } finally {
+    await run(process.execPath, [BIN, 'stop'], { env }).catch(() => {});
+    await cleanup(root);
+  }
+});
+
+test('start restarts a server of another version that start launched', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  const old = await olderServer({ port, root, pidFile: join(root, 'server.pid') });
+  try {
+    const doctor = await run(process.execPath, [BIN, 'doctor'], { env }).catch((e) => e);
+    assert.equal(doctor.code, 1);
+    assert.match(doctor.stdout, new RegExp(`server +http://127\\.0\\.0\\.1:${port} runs version 0\\.9\\.0, but this is ${VERSION.replace(/\./g, '\\.')}; run: second-chair start`));
+    const r = await run(process.execPath, [BIN, 'start', '--quiet'], { env });
+    assert.equal(r.stdout, `second-chair: restarted the server (was 0.9.0, now ${VERSION})\n`);
+    await old.exited;
+    const h = await health(port);
+    assert.equal(h.version, VERSION);
+    assert.equal(Number(await readFile(join(root, 'server.pid'), 'utf8')), h.pid);
+  } finally {
+    old.child.kill();
+    await run(process.execPath, [BIN, 'stop'], { env }).catch(() => {});
+    await cleanup(root);
+  }
+});
+
+test('start warns and exits 0 when a server of another version cannot be stopped', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  const old = await olderServer({ port, root });
+  try {
+    const r = await run(process.execPath, [BIN, 'start', '--quiet'], { env });
+    assert.equal(r.stdout.split('\n').filter(Boolean).length, 1, r.stdout);
+    assert.match(r.stdout, new RegExp(`^second-chair: the server on http://127\\.0\\.0\\.1:${port} runs version 0\\.9\\.0, but this is ${VERSION.replace(/\./g, '\\.')}\\. Stop that server by hand, then run second-chair start again\\.\\n$`));
+    assert.equal(old.child.exitCode, null, 'the older server still runs');
+    assert.equal((await health(port)).version, '0.9.0');
+  } finally {
+    old.child.kill();
     await cleanup(root);
   }
 });
