@@ -190,7 +190,7 @@ Rules for every request:
 | `POST /api/published` | `{"repo", "pr", "round", "thread_id", "action", "url"}` | `200 {"ok": true}`, or `409` for an unknown pull request, round or `thread_id`, or an empty `action`. |
 | `GET /api/status` | | `200` with one entry per pull request and round: `repo`, `pr`, `round`, `head`, `items`, `published_at`, `decided_at`, `closed_at`. |
 
-`publish` records these actions in `/api/published`: `replied`, `dropped`, `updated`, `kept`, `missing`, `body set` and `body cleared`.
+`publish` records these actions in `/api/published`: `replied`, `dropped`, `updated`, `kept`, `body set` and `body cleared`.
 
 The server stores plain JSON files under the data directory (`SECOND_CHAIR_HOME`, by default `${XDG_DATA_HOME:-~/.local/share}/second-chair`):
 
@@ -234,6 +234,8 @@ For a review of someone else's pull request.
 9. `second-chair close --repo O/N --pr N`. Submitting the review is the user's move on GitHub. Add `--submit COMMENT`, `--submit APPROVE` or `--submit REQUEST_CHANGES` to `publish` only when the user asked for it.
 
 `publish` refuses to run when round 2 has no decisions. It prints what it did, item by item. A second run skips what is already recorded, so a failure halfway can be retried.
+
+Its summary line counts the real changes on GitHub. A comment that already had the approved text counts as kept. An approved comment that is no longer in the pending review gets a line that starts with `WARNING`. It is not recorded, so the next run looks for it again.
 
 ## Command formats
 

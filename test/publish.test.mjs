@@ -238,3 +238,24 @@ test('a body for a pending review that has none goes with the submit, and is ref
   assert.deepEqual(r.done, ['C1', 'C2', 'BODY']);
   assert.equal(srv.published.BODY.action, 'body set');
 });
+
+test('an unchanged comment counts as kept, and a comment gone from the review is a warning that is never recorded', async () => {
+  const proposals = { ...reviewRound2, items: [...reviewRound2.items, { thread_id: 'C3', comment_id: 5003, reply_en: 'Gone.' }] };
+  const decisions = reviewDecisions();
+  decisions.decisions[1].reply_en = 'Rename this?';
+  decisions.decisions.push({ thread_id: 'C3', comment_id: 5003, decision: 'post', reply_en: 'Gone.' });
+  const srv = fakeServer({ proposals, decisions });
+  const warnings = [];
+  const run = () => publish({ gh: reviewGh().gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {}, warn: (m) => warnings.push(m) });
+  const r = await run();
+  assert.deepEqual(r.done, ['BODY', 'C2']);
+  assert.deepEqual(r.kept, ['C1']);
+  assert.deepEqual(r.missing, ['C3']);
+  assert.deepEqual(warnings, ['WARNING: C3: approved comment 5003 is not in your pending review; nothing was changed for it']);
+  assert.equal(srv.published.C1.action, 'kept');
+  assert.ok(!('C3' in srv.published), 'a missing comment is not recorded');
+  const again = await run();
+  assert.deepEqual(again.skipped, ['BODY', 'C1', 'C2']);
+  assert.deepEqual(again.missing, ['C3'], 'a second run looks for it again');
+  assert.equal(warnings.length, 2);
+});
