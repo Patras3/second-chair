@@ -149,9 +149,12 @@ function stateFor(payload, previous) {
   const decisions = {};
   for (const it of payload.items) {
     const old = keep[it.thread_id];
-    // A reply you edited survives a re-import; an untouched one takes the agent's new draft.
+    // A reply you edited survives a re-import; an untouched one takes the agent's new draft. A decision you
+    // made on the old draft does not count for a new one: you approve the text that will be posted.
+    const before = old && !old.replyEdited ? previous.payload.items.find((x) => x.thread_id === it.thread_id) : null;
+    const changed = Boolean(old) && !old.replyEdited && (before?.reply_en ?? '') !== (it.reply_en ?? '');
     decisions[it.thread_id] = old
-      ? { decision: old.decision, note: old.note ?? '', reply: old.replyEdited ? old.reply : (it.reply_en ?? ''), replyEdited: Boolean(old.replyEdited) }
+      ? { decision: changed ? null : old.decision, note: old.note ?? '', reply: old.replyEdited ? old.reply : (it.reply_en ?? ''), replyEdited: Boolean(old.replyEdited) }
       : { decision: null, note: '', reply: it.reply_en ?? '', replyEdited: false };
   }
   // A send answers one publication of the proposals; a new publication needs a new send.

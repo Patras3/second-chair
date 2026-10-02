@@ -52,7 +52,19 @@ test('a re-import keeps decisions and edited replies, and takes new drafts for u
   const r = stateFor(next, s);
   assert.deepEqual(r.decisions.T1, { decision: 'pushback', note: 'n', reply: 'My words.', replyEdited: true });
   assert.equal(r.decisions.G.reply, 'New draft.');
-  assert.equal(r.decisions.G.decision, 'reply');
+  assert.equal(r.decisions.G.decision, null, 'a decision on the old draft does not carry over to a new one');
+  assert.equal(stateFor(payload(), s).decisions.G.decision, 'reply', 'an unchanged draft keeps its decision');
+});
+
+test('a re-push of the final round asks again for a reply whose text changed', () => {
+  const r2 = (text) => payload({ round: 2, published_at: text, items: [{ thread_id: 'T1', comment_id: 11, verdict: 'publish', reply_en: text }, { thread_id: 'T2', comment_id: 22, verdict: 'publish', reply_en: 'Same.' }] });
+  const s = stateFor(r2('Done in abc.'), null);
+  s.decisions.T1.decision = 'publish';
+  s.decisions.T2.decision = 'publish';
+  const r = stateFor(r2('Done in abc. Also removed the old helper.'), s);
+  assert.deepEqual(r.decisions.T1, { decision: null, note: '', reply: 'Done in abc. Also removed the old helper.', replyEdited: false });
+  assert.equal(r.decisions.T2.decision, 'publish');
+  assert.equal(buildExport(r, 'now'), null, 'nothing can be sent until the new text is approved');
 });
 
 test('round 2 starts clean even over round 1 decisions', () => {
