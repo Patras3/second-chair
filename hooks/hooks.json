@@ -4,7 +4,7 @@
       {
         "matcher": "startup|resume",
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/second-chair\" start --quiet", "timeout": 10 }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/second-chair\" start --quiet", "timeout": 30 }
         ]
       }
     ]
