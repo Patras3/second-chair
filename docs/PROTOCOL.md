@@ -181,7 +181,7 @@ Rules for every request:
 
 | Method and path | Query or body | Answers |
 |:--|:--|:--|
-| `GET /health` | | `200 {"ok": true, "tool": "second-chair", "pid": N, "version": "1.0.0"}`. `pid` is the server's process id. `stop` signals a process only when this `pid` matches the pid file. `version` is the version in the server's `package.json`. `start` restarts a server whose version differs from its own. Needs no `X-Second-Chair` header. |
+| `GET /health` | | `200 {"ok": true, "tool": "second-chair", "pid": N, "version": "1.0.0"}`. `pid` is the server's process id. `stop` signals a process only when this `pid` matches the pid file. `version` is the version in the server's `package.json`. `start` restarts a server whose version is older than its own, or missing. It keeps a newer server. Needs no `X-Second-Chair` header. |
 | `GET /second-chair.user.js` | | `200` with the userscript, with the server's port written into it. Needs no `X-Second-Chair` header. |
 | `GET /api/proposals` | `?repo=O/N&pr=N[&round=R]` | `200` with the payload, `400` without a valid `repo` and `pr` or with a `round` that is not a whole number of 1 or more, `404` when there is none. Without `round`: the most recently pushed round, so a new round 1 wins over an older round 2. |
 | `PUT /api/proposals` | a proposals payload | `200 {"ok": true, "published_at": "…"}`, or `400` with the reason. It replaces that round's proposals and deletes that round's decisions. |

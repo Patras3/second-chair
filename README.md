@@ -162,7 +162,7 @@ With the plugin alone, these commands run inside Claude Code. See [Where the com
 
 | Command | What it does |
 |:--|:--|
-| `second-chair start [--quiet]` | Starts the server in the background, unless one of the same version already answers on the port. Restarts a server of another version that `start` launched. The server writes a pid file and a log to the data directory. |
+| `second-chair start [--quiet]` | Starts the server in the background, unless one of the same or a newer version already answers on the port. Restarts an older server that `start` launched. The server writes a pid file and a log to the data directory. |
 | `second-chair stop` | Stops the server that `start` started. It signals nothing when the server on the port has another process id. |
 | `second-chair doctor` | Checks Node, `gh`, the server, its version and the port. Prints the userscript address and what to fix. |
 | `second-chair serve [--port N]` | Runs the server in the foreground. |
@@ -256,7 +256,11 @@ The server keeps its data per repository and pull request. Sessions that work on
 
 When several sessions start at the same moment, each one tries to start a server. One server gets the port, and every session uses it.
 
-After a plugin update, the next session restarts the server, so the new version runs. A server that `second-chair start` did not launch, such as a service, is left alone. The session then prints a line that asks you to stop that server by hand.
+After a plugin update, the next session restarts the server, so the new version runs. Only an older server is restarted. A newer one keeps running, and `second-chair doctor` says that your copy needs an update. A server that `second-chair start` did not launch, such as a service, is left alone. The session then prints a line that asks you to stop that server by hand.
+
+The session start hook may take up to 30 seconds. A restart needs that time on a slow machine: the old server stops first, and the new one must start and answer.
+
+A wait for your decisions survives a restart. `second-chair wait` and `get` keep trying for 15 seconds when the server does not answer.
 
 A container that shares the host network (for example `docker run --network host`) shares the server too.
 
