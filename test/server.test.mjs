@@ -1,10 +1,10 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, request } from 'node:http';
-import { createHandler, createStore } from '../lib/server.mjs';
+import { createHandler, createStore, startServer } from '../lib/server.mjs';
 
 let server;
 let base;
@@ -183,4 +183,22 @@ test('a body over 5 MB gets a 413 answer, with or without a Content-Length', asy
     assert.equal(status, 413, chunked ? 'chunked' : 'with Content-Length');
   }
   assert.equal((await call('GET', '/api/status')).status, 200, 'the server still answers');
+});
+
+test('with a pid file, the server writes its pid once it listens, and removes the file when it closes', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sc-pid-'));
+  const pidFile = join(dir, 'server.pid');
+  const first = await startServer({ port: 0, root: dir, pidFile, log: () => {} });
+  try {
+    assert.equal(await readFile(pidFile, 'utf8'), String(process.pid));
+    // A second server on the same port fails to listen. It must not touch the winner's pid file.
+    await writeFile(pidFile, 'winner');
+    await assert.rejects(startServer({ port: first.address().port, root: dir, pidFile, log: () => {} }), { code: 'EADDRINUSE' });
+    assert.equal(await readFile(pidFile, 'utf8'), 'winner');
+    await writeFile(pidFile, String(process.pid));
+  } finally {
+    await new Promise((r) => first.close(r));
+  }
+  assert.equal(await readFile(pidFile, 'utf8').catch(() => 'gone'), 'gone');
+  await rm(dir, { recursive: true, force: true });
 });

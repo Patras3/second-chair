@@ -6,13 +6,25 @@ import { join } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:net';
-import { probe } from '../lib/daemon.mjs';
+import { health, probe } from '../lib/daemon.mjs';
 import { buildPayload } from '../lib/payload.mjs';
 import { draftArgs } from '../lib/cli.mjs';
 import { startServer } from '../lib/server.mjs';
 
 const run = promisify(execFile);
 const BIN = new URL('../bin/second-chair', import.meta.url).pathname;
+
+// On Windows a killed server can hold server.log open a moment longer, so the cleanup retries.
+const cleanup = (root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function until(check, what) {
+  for (let i = 0; i < 50; i++) {
+    if (await check()) return;
+    await sleep(100);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
 
 async function freePort() {
   const s = createServer();
@@ -214,5 +226,66 @@ test('put-decisions hands pasted decisions to the server, and shows why the serv
   } finally {
     server.close();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('several sessions starting at once leave one server, and its own pid in the pid file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  try {
+    const runs = await Promise.all([1, 2, 3, 4].map(() => run(process.execPath, [BIN, 'start', '--quiet'], { env }).catch((e) => e)));
+    for (const r of runs) assert.ok(!(r instanceof Error), `every start exits 0: ${r.stderr ?? ''}`);
+    const h = await health(port);
+    assert.ok(h, 'a server answers');
+    assert.equal(Number(await readFile(join(root, 'server.pid'), 'utf8')), h.pid);
+    assert.equal(runs.filter((r) => /started/.test(r.stdout)).length, 1, 'only one start says it started the server');
+    const stopped = await run(process.execPath, [BIN, 'stop'], { env });
+    assert.match(stopped.stdout, /server stopped/);
+    assert.equal(await probe(port), false);
+  } finally {
+    // When the test fails, the pid file may name the wrong process, so end the server by its own pid.
+    const left = await health(port);
+    if (left && left.pid !== process.pid) process.kill(left.pid);
+    await cleanup(root);
+  }
+});
+
+test('the server removes its pid file when it is told to stop', { skip: process.platform === 'win32' && 'Windows ends a process without running its signal handlers' }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const pidFile = join(root, 'server.pid');
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    const child = spawn(process.execPath, [BIN, 'serve', '--port', String(port), '--pid-file', pidFile], { env: { ...process.env, SECOND_CHAIR_HOME: root }, stdio: 'ignore' });
+    const exited = new Promise((r) => child.once('exit', r));
+    try {
+      await until(() => probe(port), 'the server');
+      assert.equal(Number(await readFile(pidFile, 'utf8')), child.pid);
+      child.kill(signal);
+      await exited;
+      assert.equal(await readFile(pidFile, 'utf8').catch(() => 'gone'), 'gone', signal);
+    } finally {
+      child.kill();
+    }
+  }
+  await cleanup(root);
+});
+
+test('start removes a pid file that does not belong to the server on the port', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  const other = await startServer({ port, root, log: () => {} });
+  const bystander = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
+  try {
+    await writeFile(join(root, 'server.pid'), String(bystander.pid));
+    await run(process.execPath, [BIN, 'start', '--quiet'], { env });
+    assert.equal(await readFile(join(root, 'server.pid'), 'utf8').catch(() => 'gone'), 'gone');
+    assert.equal(bystander.exitCode, null);
+    assert.equal(await probe(port), true, 'the other server still runs');
+  } finally {
+    bystander.kill();
+    other.close();
+    await cleanup(root);
   }
 });
