@@ -721,6 +721,13 @@ function secondChairBootstrap() {
     return document.getElementById(`discussion_r${item.comment_id}`) || document.getElementById(`r${item.comment_id}`);
   }
 
+  /** The thread's last comment on the page. GitHub renders the replies as siblings that follow the first comment. */
+  function lastComment(anchor) {
+    let last = anchor;
+    while (/^(discussion_)?r\d+$/.test(last.nextElementSibling?.id ?? '')) last = last.nextElementSibling;
+    return last;
+  }
+
   const inlineCard = (id) => document.querySelector(`.sc-card[data-sc-where=inline][data-sc-card="${CSS.escape(id)}"]`);
   const showInline = () => Boolean(state) && (!done() || showDoneCards);
 
@@ -739,7 +746,7 @@ function secondChairBootstrap() {
     for (const it of state.payload.items) {
       const anchor = anchorFor(it);
       if (!anchor || inlineCard(it.thread_id)) continue;
-      anchor.insertAdjacentElement('afterend', cardElement(it));
+      lastComment(anchor).insertAdjacentElement('afterend', cardElement(it));
     }
   }
 

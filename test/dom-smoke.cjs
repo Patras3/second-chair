@@ -23,9 +23,10 @@ const payload = {
 };
 let failures = 0;
 const check = (cond, msg) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); if (!cond) failures++; };
+// T1 holds a conversation, its comments siblings the way GitHub renders them.
 // T4 sits in a folded <details> the way GitHub folds a resolved thread; T5 appears only after "Load more".
 const PAGE = `<html><head></head><body>
-<div id="discussion_r11">comment 11</div><div style="height:1500px"></div>
+<div class="js-comments-holder"><div id="discussion_r11">comment 11</div><div id="discussion_r12">reply 12</div><div id="discussion_r13">reply 13</div></div><div style="height:1500px"></div>
 <div id="discussion_r22">comment 22</div><div style="height:1500px"></div>
 <div id="discussion_r33">comment 33</div><div style="height:1500px"></div>
 <details><summary>resolved</summary><div id="discussion_r44">comment 44</div></details><div style="height:1500px"></div>
@@ -60,6 +61,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   const page = await openPage(browser, port);
   await page.waitForSelector(card('T1'));
   check((await page.locator('.sc-card[data-sc-where=inline]').count()) === 4, 'cards for the four loaded threads; none for the general item or the unloaded one');
+  check(await page.evaluate(() => document.querySelector('#discussion_r13').nextElementSibling?.dataset.scCard === 'T1'), 'the card follows the last comment of the conversation, not the first');
   check((await page.textContent('.sc-toggle')).includes('3/6'), 'the three auto items count as decided');
   check(await page.locator('.sc-toggle > svg.sc-logo[aria-hidden=true]').count() === 1 && (await page.getAttribute('.sc-toggle', 'aria-label')) === 'Second Chair', 'the pill shows the chair mark and has an accessible name');
   check(await page.locator(`${card('T1')} .sc-card-head svg.sc-logo`).count() === 1, 'the card header shows the chair mark');
