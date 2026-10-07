@@ -1,6 +1,6 @@
 {
   "name": "second-chair",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "AI prepares. You decide. Work through GitHub code reviews with your coding agent.",
   "license": "MIT",
   "type": "module",

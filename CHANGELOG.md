@@ -1,8 +1,12 @@
 # Changelog
 
-## 1.1.0
+## 1.1.1
 
 Not released yet: no tag and no GitHub Release.
+
+- The filter bar in the side panel no longer shows a scroll bar of its own.
+
+## 1.1.0
 
 Added:
 

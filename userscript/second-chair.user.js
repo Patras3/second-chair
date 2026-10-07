@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Second Chair
 // @namespace    https://github.com/Patras3/second-chair
-// @version      1.1.0
+// @version      1.1.1
 // @icon         data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%20fill=%22none%22%20stroke=%22%231f2328%22%20stroke-width=%221.5%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22%3E%3Cpath%20d=%22M5.75%201.75%205.25%209.25M3.75%209.25h8.5M5.25%209.25l-1%205M11%209.25l1%205%22/%3E%3C/svg%3E
 // @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*
@@ -659,8 +659,8 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-done-label{color:var(--fgColor-done,#8250df);border-color:var(--fgColor-done,#8250df);background:var(--bgColor-done-muted,#fbefff)}
 .sc-menu{position:absolute;right:14px;top:48px;z-index:2;width:220px;padding:6px 0;background:var(--overlay-bgColor,var(--bgColor-default,#fff));border:1px solid var(--borderColor-default,#d0d7de);border-radius:8px;box-shadow:var(--shadow-floating-medium,0 8px 24px rgba(140,149,159,.3))}
 .sc-menu .sc-link{display:block;width:100%;text-align:left;padding:6px 14px;color:inherit}.sc-menu .sc-link:hover{background:var(--bgColor-muted,#f6f8fa);text-decoration:none}.sc-menu hr{border:0;border-top:1px solid var(--borderColor-default,#d0d7de);margin:6px 0}.sc-menu .sc-danger{color:var(--fgColor-danger,#d1242f)!important}
-.sc-tabbar{display:flex;align-items:center;gap:2px;padding:0 10px;border-bottom:1px solid var(--borderColor-default,#d0d7de);overflow-x:auto}
-.sc-ftab{padding:8px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;color:inherit;font:inherit;cursor:pointer;white-space:nowrap}
+.sc-tabbar{display:flex;align-items:center;gap:2px;padding:0 10px;box-shadow:inset 0 -1px 0 var(--borderColor-default,#d0d7de);overflow-x:auto;overflow-y:hidden}
+.sc-ftab{padding:8px;border:0;border-bottom:2px solid transparent;background:none;color:inherit;font:inherit;cursor:pointer;white-space:nowrap}
 .sc-ftab-on{border-bottom-color:var(--underlineNav-borderColor-active,#fd8c73);font-weight:600}
 .sc-ftab b{font-weight:500;font-size:12px;margin-left:4px;padding:0 6px;border-radius:2em;background:var(--bgColor-neutral-muted,#afb8c133)}
 .sc-fdecision{margin-left:auto;font:12px system-ui;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-muted,#f6f8fa);color:inherit;padding:2px 6px}

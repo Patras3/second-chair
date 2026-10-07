@@ -187,6 +187,7 @@ async function decideAndSend(page, key) {
   const rv = await openPage(browser, port, 11);
   await rv.waitForSelector('.sc-yourreview');
   check(await rv.locator('.sc-yourreview .sc-card[data-sc-card=BODY]').count() === 1, 'the review body sits in the Your review block');
+  check(await rv.evaluate(() => { const bar = document.querySelector('.sc-tabbar'); return bar.scrollHeight <= bar.clientHeight; }), 'the filter bar has nothing to scroll up and down');
   check(await rv.locator('.sc-row[data-sc-item=BODY]').count() === 0, 'and not in the file list');
   check(await rv.locator('.sc-yourreview [data-sc-act=submit][data-sc-val=""].sc-on').count() === 1, 'Leave as draft is the default');
   check(await rv.locator('.sc-yourreview [data-sc-act=submit][data-sc-val=REQUEST_CHANGES].sc-suggested').count() === 1, 'the agent suggestion is outlined, not chosen');
