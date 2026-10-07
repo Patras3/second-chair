@@ -21,6 +21,16 @@ Work through GitHub code reviews with your coding agent. Nothing gets posted wit
 - You decide every card: keep it, edit the text, or tell the agent what to change.
 - The agent posts exactly the text you approved, through `second-chair publish`.
 
+## How it works
+
+1. **The agent proposes.** It writes a reply for every review thread on your pull request, or a comment for every finding on someone else's.
+2. **You decide.** Each proposal shows as a card under its thread on GitHub. Keep it, change the text, or tell the agent what to change.
+3. **The agent posts what you approved,** with your exact text.
+
+The side panel always says whose turn it is: yours, or the agent's. The first time Second Chair runs, the panel opens with a short guide. The **?** in the panel opens it again.
+
+<img src="docs/images/guide.png" width="420" alt="The guide in the side panel: the three steps, then the rounds and buttons of review mode">
+
 ## Install
 
 You need:
@@ -44,7 +54,7 @@ Then:
 2. Start a new Claude Code session. Its start hook runs the local server. Run `/second-chair:setup` in that session. It checks Node, `gh` and the server, and walks you through the browser steps.
 3. Open <http://127.0.0.1:7788/second-chair.user.js> in your browser. The script manager offers to install the script. Updates come from the same address.
 
-Open any pull request on github.com. A small pill with the Second Chair chair icon at the bottom right means it works.
+Open any pull request on github.com. A small pill with the Second Chair chair icon at the bottom right means it works. The guide opens the first time.
 
 ### Where the command runs
 
@@ -94,15 +104,19 @@ The agent reads every unresolved thread and writes a proposal for each one. Open
 **Round 1: decide.** Each card shows:
 
 - **For you · never posted**: what the agent checked, and its plan for a fix.
-- **Reply to post**: the draft reply. **Preview** shows it as GitHub will. **Write** lets you edit it, and your text wins.
-- The buttons **Reply**, **Fix**, **Push back** and **Manual**. The agent's proposal has a dashed outline. **Manual** means you handle the thread yourself.
-- **Note for the agent**: an instruction, for example "fix it, but keep the old method".
+- **Draft reply**: the reply as GitHub will show it. It is posted only if you approve it in round 2. **✎ Edit**, or a click on the text, lets you change it, and your text wins. **Undo my edits** brings the agent's text back.
+- The buttons **Reply**, **Fix**, **Push back** and **Manual**. The agent's proposal has a dashed outline. Each button explains itself in its tooltip. **Manual** means you handle the thread yourself.
+- **Note for the agent**: an instruction, for example "fix it, but keep the old method". It is never posted.
 
 The agent marks an item **auto** when it has no doubt, such as a typo. An auto item counts as decided with the agent's proposal and shows as one line. Pick another button to override it.
 
 **Send decisions** at the bottom of the side panel unlocks when every thread has a decision. The agent then makes the fixes you approved and commits them. It does not push yet.
 
-**Round 2: publish.** The cards come back with the final replies and the commits. The buttons are **Publish**, **Hold** and **Manual**. After you send, the agent pushes the commits and runs `second-chair publish`. It posts the replies you marked **Publish**, with the text as you left it. **Hold** and **Manual** post nothing.
+**While the agent works,** the panel says so and shows when the agent picked your decisions up. Round 2 opens by itself. **Edit and send again** lets you change a decision in the meantime. The agent may already be working on the first version, so the panel asks first. The agent sees the change before it can show you round 2.
+
+<img src="docs/images/waiting.png" width="420" alt="The side panel after round 1 was sent: the agent's turn, the time it picked the decisions up, and Waiting for round 2">
+
+**Round 2: publish.** The cards come back with the final replies and the commits. The buttons are **Publish**, **Revise**, **Hold** and **Manual**. **Revise** asks the agent for a new version, with a note. Round 2 then comes back, and nothing is posted. After you send without a **Revise**, the agent pushes the commits and runs `second-chair publish`. It posts the replies you marked **Publish**, with the text as you left it. **Hold** and **Manual** post nothing.
 
 Respond mode posts nothing on GitHub until you send round 2.
 
@@ -118,23 +132,38 @@ The pill at the bottom right opens the side panel. The panel lists every thread,
 
 The findings come from the agent's own review, from another skill such as `/code-review`, or from your notes. The agent adds them as comments to a pending (draft) review on GitHub. GitHub allows one pending review per person and pull request. If you already started one on this pull request, the agent adds to it. Your own comments and your review body get cards too, marked **Your draft comment**.
 
-**Round 1.** Each comment has **Post**, **Revise** and **Drop**. **Revise** needs a note that says what to change. The note field stays red until you write one.
+Who puts what on GitHub, and when:
 
-**Round 2.** The agent rewrites the revised comments. The cards show the final texts with **Post** and **Drop**. After you send, `second-chair publish` edits and deletes the pending comments to match your decisions.
+| When | Who | What happens on GitHub |
+|:--|:--|:--|
+| Before round 1 | the agent, `second-chair draft` | Its findings become comments in your pending review. Only you see them, marked Pending. |
+| Rounds 1 and 2 | you, in Second Chair | Nothing. |
+| After round 2 | the agent, `second-chair publish` | It edits and deletes the pending comments to match your decisions, and sets the review body. |
+| Submit | your choice in round 2 | **Leave as draft**: you submit the review on GitHub. **Comment**, **Approve** or **Request changes**: `publish` submits it with that event. |
 
-The pending review on GitHub now holds exactly what you chose. **Submitting it is your move**, on GitHub. Review mode never submits the review unless you ask the agent to. Then the agent submits it with the event you named: comment, approve or request changes.
+Do not use GitHub's own **Submit review** button during the rounds. It makes the review public with every comment in it, including the ones you have not decided yet.
+
+The draft comments show on the **Files changed** tab, and `push` links there. GitHub may fold them. A folded comment's row in the panel says "folded on GitHub · decide here", and its card opens in the panel.
+
+**Round 1.** Each comment has **Keep**, **Revise** and **Drop**. **Revise** needs a note that says what to change. The note field stays red until you write one. The review body has its own block, **Your review**, at the top of the panel.
+
+**Round 2.** The agent rewrites the revised comments. The cards show the final texts with **Keep**, **Revise** and **Drop**. Under the review body you choose what happens to the review. The agent may suggest an event: it has a dashed outline, and it is never chosen for you. When GitHub would refuse your choice, the send stays locked, and the footer says why. For example, GitHub adds a body to a pending review that has none only with the submit.
+
+After you send, `second-chair publish` edits and deletes the pending comments to match your decisions, then submits the review if you chose an event.
+
+**A second pass.** When you ask the agent to review the same pull request again, it updates the comments of the first pass instead of adding new ones. Their cards say **Second Chair · earlier pass** and fold the **Earlier text**.
 
 ![A review-mode card under a pending comment: Revise is picked, and the empty note field is red](docs/images/review-mode.png)
 
 ## When it is done
 
-A pull request's work in Second Chair is done when one of these happens:
+After you send the final round without a **Revise**, the cards leave the page, and the pill reads **publishing**. The agent pushes, runs `publish`, then `second-chair close`. The work on the pull request is done when one of these happens:
 
-- You send the final round (round 2). This counts even when the server was down and the decisions went to the clipboard.
 - The agent runs `second-chair close`.
 - You pick **Mark as done** in the panel's **⋯** menu.
+- The server was down at the final send, and the decisions went to the clipboard.
 
-The cards then leave the page, and the pill reads **✓ done**. The panel shows a purple **Done** banner and a read-only list of every decision and commit. **Show cards on the page** brings the cards back, read only, until the next reload. A new proposal from the agent starts over.
+The pill then reads **✓ done**. The panel shows a purple **Done** banner with what reached GitHub, with links, and a read-only list of every decision and commit. **Show cards on the page** brings the cards back, read only, until the next reload. A new proposal from the agent starts over.
 
 <img src="docs/images/done.png" width="420" alt="The side panel after the final round: a Done banner and a read-only list of decisions with their commits">
 
@@ -145,10 +174,10 @@ The keys work when the panel is open and the focus is not in a text field.
 | Key | Action |
 |:--|:--|
 | `j` / `k` | Next / previous thread. The arrow keys do the same once a row is selected. |
-| `Enter` | Open or fold the selected card. |
-| `1` to `4` | Pick the first to fourth button of the selected thread. Round 2 and review mode have fewer buttons. The same key again clears the choice. |
+| `Enter` | Open or fold the selected card in the panel. |
+| `1` to `4` | Pick the first to fourth button of the selected thread. Review mode has three. The same key again clears the choice. |
 | `e` | Edit the reply of the selected thread. |
-| `Esc` | Leave a text field. |
+| `Esc` | Finish editing, or leave the note field. |
 
 ## How it stays safe
 
@@ -278,6 +307,8 @@ A container that shares the host network (for example `docker run --network host
 - In Chrome and Edge, turn on **Allow user scripts** or developer mode. See [Browser setup](#browser-setup).
 - Reload the page after you install the script.
 
+**The panel is closed on a pull request.** It stays closed when the server has no proposals for that pull request. Click the pill to open it. It says which command starts Second Chair.
+
 **The panel shows a red dot ("server off").** The page cannot reach the server. Start a Claude Code session, or run `! second-chair start` in one. `! second-chair doctor` shows why the server is down. In your own terminal, the commands work after `npm install -g` (see [Where the command runs](#where-the-command-runs)). Without a server, **Load from clipboard** in the **⋯** menu reads a payload from the clipboard. **Send decisions** then copies the decisions to the clipboard, and you paste them to the agent.
 
 **Port 7788 is in use.** `second-chair doctor` says when another program holds the port. Set a free port in your shell profile, for example `export SECOND_CHAIR_PORT=7790`. Claude Code and its hook use it too, but only when Claude Code starts from that shell. Start the server again, then install the userscript again from `http://127.0.0.1:7790/second-chair.user.js`. The server writes its port into the script it serves, so the old script still calls port 7788.
@@ -286,9 +317,13 @@ A container that shares the host network (for example `docker run --network host
 
 **A thread shows "not loaded on page".** GitHub loads long conversations in parts and folds resolved threads. Select the row in the panel. Second Chair unfolds folded threads, asks GitHub for the thread by its link, and clicks **Load more** until the thread appears. If GitHub still does not show it, the card opens in the panel, and you decide it there. The comments of a pending review show only in the **Files changed** tab.
 
+**`push` refuses because the decisions changed.** You sent a round again while the agent worked on it. The agent must read the change first. Its message names a `get` command. The skills run it, compare, and redo what changed.
+
+**Edit did nothing on the Files changed tab.** That was a bug in 1.0: GitHub's own code took the clicks. Update the userscript from <http://127.0.0.1:7788/second-chair.user.js>.
+
 **`publish` refuses because you have a pending review.** GitHub posts no reply when you have a pending review on the same pull request. Submit or delete that review on GitHub, then ask the agent to run `publish` again. Nothing was posted.
 
-**`publish` refuses to add a review body.** GitHub cannot add a body to a pending review that started without one, except together with the submit. The agent asks you whether to submit now, and with which event, or to drop the body.
+**`publish` refuses to add a review body.** GitHub adds a body to a pending review that started without one only together with the submit. The panel normally locks this choice. When it did not, the agent shows round 2 again, and you choose an event or drop the body.
 
 [docs/PROTOCOL.md](docs/PROTOCOL.md#github-limits) lists the GitHub limits behind these messages.
 

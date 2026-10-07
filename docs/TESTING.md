@@ -75,14 +75,25 @@ Use a pull request by another account.
 
 - [ ] In the GitHub UI, start a review and write one comment by hand. Do not submit it.
 - [ ] `/second-chair:review <PR>` with two findings. The pending review now holds three comments, and the hand-written one has a **Your draft comment** card.
-- [ ] Round 1: **Revise** one comment with a note, **Drop** one, **Post** the hand-written one. Send.
-- [ ] Round 2: the revised text follows the note. Send with **Post** on the two that are left.
+- [ ] Round 1: **Revise** one comment with a note, **Drop** one, **Keep** the hand-written one. Send.
+- [ ] Round 2: the revised text follows the note. Send with **Keep** on the two that are left and **Leave as draft**.
 - [ ] After `publish`, the pending review on GitHub holds the two comments with the approved texts, and the dropped one is gone. The review is still pending.
 - [ ] With no pending review on the pull request, `second-chair draft <PR> --body-file body.md` with no comments file creates a pending review. `second-chair pending <PR>` shows it with that body and no comments.
 
+### 1.1: guide, turns, resend, review submit
+
+- [ ] In a browser profile that never ran Second Chair, open a pull request. The panel opens with the guide. **Got it** closes it, and a reload does not show it again. **?** opens it.
+- [ ] A pull request with no proposals keeps the panel closed. The pill shows a dash. A click opens a panel that names the two commands.
+- [ ] Respond: after the round 1 send, the panel says it is the agent's turn and shows when the agent picked the decisions up. Round 2 opens by itself, without a reload.
+- [ ] Respond: after the pick-up, **Edit and send again**, change one decision, send. The agent's `push` of round 2 is refused until it ran `get`, and the agent tells you what changed.
+- [ ] Respond: round 2 with one **Revise**. Nothing is posted, and round 2 comes back with the new text.
+- [ ] Review, on the Files changed tab: **✎ Edit**, a click on the text, **Preview**, **Undo my edits**, **expand** and the arrows work on an inline card.
+- [ ] Review: round 2 with **Comment** chosen in **Your review**. After `publish`, the review on GitHub is submitted as a comment, and the panel says "Submitted as Comment".
+- [ ] Review: run `/second-chair:review` on the same pull request a second time. No line has two comments. The cards of the first pass say **earlier pass**.
+
 ### Cards after the end
 
-- [ ] After the final send, no card stays on the page and the pill reads **✓ done**.
+- [ ] After the final send, no card stays on the page and the pill reads **publishing**. After the agent's `close`, it reads **✓ done**, and the panel lists the posted replies with links.
 - [ ] After a reload, the cards stay hidden.
 - [ ] Stop the server (`second-chair stop`) and reload. The cards stay hidden.
 - [ ] **Show cards on the page** brings them back, read only.

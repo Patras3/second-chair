@@ -1,6 +1,6 @@
 // Renders the README screenshots: the userscript on a mock GitHub pull request page, with a real
 // second-chair server behind it. Run: PLAYWRIGHT=/path/to/node_modules/playwright npm run screenshots
-// Writes docs/images/{card-light,card-dark,panel,review-mode,done,social-preview}.png.
+// Writes docs/images/{card-light,card-dark,panel,review-mode,waiting,done,guide,social-preview}.png.
 const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
 const fs = require('fs');
 const os = require('os');
@@ -230,7 +230,8 @@ async function openPage(browser, port, { url, html, store, viewport, scale = 1.5
   await context.clock.setFixedTime(new Date('2026-09-30T18:20:00Z'));
   const page = await context.newPage();
   await page.route(url, (r) => r.fulfill({ contentType: 'text/html', body: html }));
-  await installGm(page, port, store ? JSON.stringify(store) : null);
+  // A browser that has seen the guide, unless the shot is the guide itself.
+  await installGm(page, port, JSON.stringify({ 'sc:guide': '1', ...(store ?? {}) }));
   await page.goto(url);
   for (const v of vendor) await page.addScriptTag({ content: v });
   await page.addScriptTag({ content: script });
@@ -314,21 +315,49 @@ const hidePill = (page) => page.addStyleTag({ content: '.sc-toggle{visibility:hi
     await p.context().close();
   }
 
-  // 5. Round 2 sent: the triage is done, the panel is read only.
+  // 5. Round 1 sent: the agent's turn, and it picked the decisions up.
+  {
+    const picks = Object.fromEntries(r1.items.map((it) => [it.thread_id, { decision: it.verdict }]));
+    const sent = { tool: 'second-chair', kind: 'decisions', repo: REPO, pr: 42, round: 1, head: HEAD1, exported_at: '2026-09-30T18:03:00.000Z',
+      decisions: r1.items.map((it) => ({ thread_id: it.thread_id, comment_id: it.comment_id ?? null, proposed: it.verdict, decision: it.verdict, auto: Boolean(it.auto), reply_en: it.reply_en, reply_edited: false, note: '' })) };
+    await api('POST', '/api/decisions', sent);
+    await api('GET', `/api/decisions?repo=${REPO}&pr=42&round=1`);
+    const store = { ...browserState(r1, picks, { sentAt: '2026-09-30T18:03:00.000Z', sentVia: 'server', lastExport: '2026-09-30T18:03:00.000Z' }), 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) };
+    const p = await openPage(browser, port, { url: url42, html: html42('light'), store, viewport: { width: 1000, height: 830 }, scale: 1.4 });
+    await p.waitForFunction(() => /picked up/.test(document.querySelector('.sc-status')?.textContent ?? ''), null, { timeout: 9000 });
+    await shoot(p.locator('.sc-panel'), 'waiting.png');
+    await p.context().close();
+  }
+
+  // 6. Round 2 sent and published: the work is done, the panel says what was posted.
   {
     await api('PUT', '/api/proposals', proposals(42, 2, HEAD2, respondItems.map((it) => ({ ...it, auto: false, ...round2[it.thread_id] }))));
     const r2 = await stored(42, 2);
     const picks = Object.fromEntries(r2.items.map((it) => [it.thread_id, { decision: 'publish' }]));
     picks.PRRT_kwDOAbc112 = { decision: 'hold' };
     picks.PRRT_kwDOAbc309 = { decision: 'manual' };
+    for (const [id, pick] of Object.entries(picks)) {
+      if (pick.decision !== 'publish') continue;
+      const n = r2.items.find((it) => it.thread_id === id).comment_id ?? 1000;
+      await api('POST', '/api/published', { repo: REPO, pr: 42, round: 2, thread_id: id, action: 'replied', url: `https://github.com/${REPO}/pull/42#discussion_r${n + 5000}` });
+    }
+    await api('POST', '/api/close', { repo: REPO, pr: 42 });
     const store = { ...browserState(r2, picks, { sentAt: '2026-09-30T18:03:00.000Z', sentVia: 'server' }), 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) };
     const p = await openPage(browser, port, { url: url42, html: html42('light'), store, viewport: { width: 1000, height: 830 }, scale: 1.4 });
-    await p.waitForSelector('.sc-banner-done');
+    await p.waitForSelector('.sc-banner-done .sc-posted');
     await shoot(p.locator('.sc-panel'), 'done.png');
     await p.context().close();
   }
 
-  // 6. The social preview: the mark, the name and the tagline on a 1280 x 640 page.
+  // 7. The guide, as it opens on first use.
+  {
+    const p = await openPage(browser, port, { url: url57, html: html57, store: { 'sc:guide': '0' }, viewport: { width: 1000, height: 1100 }, scale: 1.4 });
+    await p.waitForSelector('.sc-guide [data-sc-val=review][aria-selected=true]');
+    await shoot(p.locator('.sc-panel'), 'guide.png');
+    await p.context().close();
+  }
+
+  // 8. The social preview: the mark, the name and the tagline on a 1280 x 640 page.
   {
     const mark = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="200" height="200" fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.75 1.75 5.25 9.25M3.75 9.25h8.5M5.25 9.25l-1 5M11 9.25l1 5"/></svg>';
     const html = `<!doctype html><meta charset="utf-8"><style>

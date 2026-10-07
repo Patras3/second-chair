@@ -236,7 +236,7 @@ For the threads on your own pull request.
 5. `second-chair wait --repo O/N --pr N --round 1 --timeout 1500`. Exit code `2` means the time ran out without a send, so run it again. The skills run `wait` in the background.
 6. Carry out the decisions and notes. Commit the fixes, but do not push.
 7. Write round 2 items with the final `reply_en`, the `commits`, and a `verdict` of `publish`, `hold` or `manual`. A thread the user marked `manual` in round 1 keeps `verdict: "manual"` with `auto: true`, so the user is not asked twice.
-8. `second-chair build --repo O/N --pr N --round 2 --head $(git rev-parse HEAD) items2.json > r2.json`, then `push`, then `wait --round 2`.
+8. `second-chair build --repo O/N --pr N --round 2 --head $(git rev-parse HEAD) items2.json > r2.json`, then `push`, then `wait --round 2`. When the decisions hold a `revise`, rewrite those replies and repeat this step. If `push` refuses because the decisions changed, run the `get` command it names, redo what changed, and push again.
 9. `git push`, when a reply to publish refers to a commit.
 10. `second-chair publish --repo O/N --pr N`. For each `publish` decision it posts `reply_en` as a reply to `comment_id`. A general item becomes a pull request comment. `hold` and `manual` post nothing.
 11. `second-chair close --repo O/N --pr N`.
@@ -248,7 +248,7 @@ For a review of someone else's pull request.
 1. `second-chair doctor`, then `second-chair pending <PR>`. It prints your pending review, or `null`.
 2. Write the new comments to `comments.json` and run `second-chair draft <PR> comments.json`. Add `--body-file body.md` only when `pending` printed `null`. `draft` prints one status line on stderr and the pending review with every comment id as JSON on stdout, so `draft ... > pending.json` gives a valid JSON file. With no new comments and no pending review, run `second-chair draft <PR> --body-file body.md` alone. It creates the review with only the body. With no new comments and a pending review, skip `draft`.
 3. Write one item per pending comment (`thread_id: "C<id>"`) and one `BODY` item with `comment_id: null`. A comment or body the user wrote gets `origin: "user"` and keeps the user's text in `original_en`.
-4. `second-chair build --repo O/N --pr N --mode review --round 1 --head SHA items.json > r1.json`, then `push` and `wait --round 1`.
+4. `second-chair build --repo O/N --pr N --mode review --round 1 --head SHA items.json > r1.json`, then `push` and `wait --round 1`. If a later `push` refuses because the decisions changed, run the `get` command it names, redo what changed, and push again.
 5. Rewrite each `revise` item as its note says.
 6. Write round 2 items with the final texts and `post` or `drop`. An item the user dropped in round 1 keeps `verdict: "drop"` with `auto: true`, because `publish` deletes only a comment that has a round 2 decision.
 7. `build --mode review --round 2`, `push`, then `wait --round 2`.
