@@ -21,6 +21,7 @@ This skill covers the mechanics only. How you investigate a thread and what you 
 
 1. Run `second-chair doctor`. Fix what it reports, or run `/second-chair:setup`.
 2. Run `second-chair threads [PR] > threads.json`. It prints the unresolved threads with `thread_id`, `comment_id`, `path`, `line` and the whole conversation. It leaves out the user's own pending (draft) comments. `gh pr view [PR] --json headRefOid` gives the head.
+   Then run `second-chair pending [PR]`. When it prints a review, tell the user now: GitHub posts no reply while they have a pending review on this pull request, so they must submit or delete it before `publish` runs at the end.
 3. For every thread write one item into `items.json`:
 
    | Field | Content |
@@ -35,13 +36,25 @@ This skill covers the mechanics only. How you investigate a thread and what you 
    | `auto` | `true` only when there is no doubt (a plain bug, a typo) |
 
    A general item for the whole pull request has `comment_id: null` and a `thread_id` starting with `GLOBAL`.
-4. Run `second-chair build --repo O/N --pr N --round 1 --head SHA items.json > r1.json`, then `second-chair push r1.json`. Tell the user to open the pull request. The cards are under the threads.
+
+   A thread whose last comment is the user's own waits on the reviewer. `gh api user --jq .login` gives the user's login. Give such a thread `verdict: "manual"` and `auto: true`, and say in `context` that the user already answered.
+4. Run `second-chair build --repo O/N --pr N --round 1 --head SHA items.json > r1.json`, then `second-chair push r1.json`. Give the user the link that `push` printed. The cards are under the threads, and the side panel says whose turn it is.
 5. Wait with the Bash tool and `run_in_background: true`: `second-chair wait --repo O/N --pr N --round 1 --timeout 1500`. You are notified when it exits. Exit code 2 means 25 minutes passed without a send, so run it again the same way. The timeout stays under the Bash tool's 30 minute background limit on purpose. Meanwhile, answer the user if they write. If the user pastes decisions instead, save them to a file, run `second-chair put-decisions <file>`, and go on with the next step.
 6. Read the decisions that `wait` printed. Each has `decision`, `note` and `reply_en` (the user's text, maybe edited). Carry them out. Make the fixes for `fix`, following the project's conventions. A `note` overrides your plan. Commit, but do not push.
 7. Round 2: write one item per thread with the final `reply_en` and, for fixes, `commits: ["<sha>"]`. Give each item your proposed `verdict` (`publish`, `hold` or `manual`) so the suggested button shows. The user's round 2 choices are the same three. Keep the threads the user marked `manual` in round 1 with verdict `manual` and `auto: true`, so the user is not asked twice. Never mark a `publish` item `auto`. `build` refuses it, because the user approves every reply that gets posted. Run `second-chair build --repo O/N --pr N --round 2 --head $(git rev-parse HEAD) items2.json > r2.json`. The head is your local commit, not the pushed head. Then run `push` and `wait --round 2` as above.
-8. If any reply to publish refers to a commit, run `git push`.
-9. Run `second-chair publish --repo O/N --pr N`. It posts exactly the replies marked `publish`. A second run skips what is already posted.
-10. Run `second-chair close --repo O/N --pr N`. Report what was posted, with the links `publish` printed.
+8. If any round 2 decision is `revise`, the user wants a new version of that reply. Rewrite it as the note says, and keep the other items as they are. Then build, push and wait for round 2 again. Do not publish while a `revise` is in the decisions: `publish` refuses it.
+9. If any reply to publish refers to a commit, run `git push`.
+10. Run `second-chair publish --repo O/N --pr N`. It posts exactly the replies marked `publish`. A second run skips what is already posted.
+11. Run `second-chair close --repo O/N --pr N`. The page then shows the user what was posted. Report it here too, with the links `publish` printed.
+
+## If push refuses because the decisions changed
+
+The user can send a round again while you work on it (**Edit and send again**). `push` then refuses the next round until you read the change. Its message names a `get` command.
+
+1. Run that `get` command. It prints the new decisions.
+2. Compare them with the decisions you worked from.
+3. Change the work to match: revert or adjust commits, rewrite replies.
+4. Tell the user what changed, then build and push again.
 
 ## If publish refuses
 
