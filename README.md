@@ -29,7 +29,7 @@ Work through GitHub code reviews with your coding agent. Nothing gets posted wit
 
 The side panel always says whose turn it is: yours, or the agent's.
 
-The first time you see the cards of a mode and round, a short live tour starts. The page dims, and one part of Second Chair at a time lights up with a short note next to it: the card, the text that would be posted, the buttons, the status line, Send. **Next** and **Back**, or the arrow keys, move through it, and **Skip** or Esc ends it. The **?** in the side panel starts it again.
+The first time you see the cards of a mode and round, Second Chair asks whether to show a short live tour. With **Show me**, the page dims, and one part of Second Chair at a time lights up with a short note next to it: the card, the yellow box that only you see, the text that would be posted, the buttons, the note for the agent, the status line, Send. **Next** and **Back**, or the arrow keys, move through it, and **Skip** or Esc ends it. The **?** in the side panel starts it again.
 
 <img src="docs/images/tour.png" alt="The live tour: the page is dimmed, the Keep, Revise and Drop buttons of a card are lit, and a note next to them says what they do">
 

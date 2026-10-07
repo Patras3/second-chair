@@ -82,7 +82,7 @@ Use a pull request by another account.
 
 ### 1.1: tour, turns, resend, review submit
 
-- [ ] In a browser profile that never ran Second Chair, open a pull request with proposals. The tour starts: the page dims and the first card lights up. **Next**, **Back**, the arrow keys and Esc work, also on the Files changed tab. A reload does not start it again. **?** starts it.
+- [ ] In a browser profile that never ran Second Chair, open a pull request with proposals. A question in the middle of the dimmed page welcomes you and offers the tour. **Not now** closes it for good on that screen. **Show me** lights the first card. **Next**, **Back**, the arrow keys and Esc work, also on the Files changed tab. A reload does not start it again. **?** starts it without the question. In review mode with a long review body, the lit part and the note stay on screen.
 - [ ] A pull request with no proposals keeps the panel closed. The pill shows a dash. A click opens a panel that names the two commands.
 - [ ] Respond: after the round 1 send, the panel says it is the agent's turn and shows when the agent picked the decisions up. Round 2 opens by itself, without a reload.
 - [ ] Respond: after the pick-up, **Edit and send again**, change one decision, send. The agent's `push` of round 2 is refused until it ran `get`, and the agent tells you what changed.

@@ -1,8 +1,14 @@
 # Changelog
 
-## 1.1.2
+## 1.1.3
 
 Not released yet: no tag and no GitHub Release.
+
+- The tour asks before it starts: **Show me** or **Not now**. A user who has seen no tour yet gets a short welcome that says what Second Chair does on this screen.
+- The tour now shows the yellow **For you** box in review mode too, and the note for the agent in every tour, with an example.
+- A part of the panel taller than the panel, such as a long review body, is lit only where it is on screen, and the note points at it.
+
+## 1.1.2
 
 - A live tour replaces the text guide. The first time you see the cards of a mode and round, the page dims and one part of Second Chair at a time lights up, with a short note and **Next**, **Back** and **Skip**. Each tour has three to seven steps. The **?** in the side panel starts it again.
 

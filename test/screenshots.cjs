@@ -354,8 +354,8 @@ const hidePill = (page) => page.addStyleTag({ content: '.sc-toggle{visibility:hi
   {
     const p = await openPage(browser, port, { url: url57, html: html57, store: { 'sc:tour:review:1': null, 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) }, viewport: { width: 1300, height: 820 }, scale: 1.2 });
     await p.waitForSelector('.sc-tour .sc-tour-tip');
-    await p.click('[data-sc-act=tournext]');
-    await p.click('[data-sc-act=tournext]');
+    // Past the question, on to the step that lights the Keep, Revise and Drop buttons.
+    while (!/Keep it, ask the agent/.test(await p.textContent('.sc-tour-tip'))) await p.click('[data-sc-act=tournext]');
     await p.waitForTimeout(500);
     await shoot(p, 'tour.png');
     await p.context().close();

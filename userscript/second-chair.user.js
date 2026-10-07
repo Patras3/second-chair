@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Second Chair
 // @namespace    https://github.com/Patras3/second-chair
-// @version      1.1.2
+// @version      1.1.3
 // @icon         data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%20fill=%22none%22%20stroke=%22%231f2328%22%20stroke-width=%221.5%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22%3E%3Cpath%20d=%22M5.75%201.75%205.25%209.25M3.75%209.25h8.5M5.25%209.25l-1%205M11%209.25l1%205%22/%3E%3C/svg%3E
 // @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*
@@ -578,22 +578,25 @@ function buildFilterBar(state, filterKey) {
 const SC_TOURS = {
   'reply:1': [
     { at: 'card', sel: null, text: "The agent's proposal for this thread. Nothing is posted yet." },
-    { at: 'card', sel: '.sc-foryou', text: 'Only you see this: what the agent checked, and its plan.' },
+    { at: 'card', sel: '.sc-foryou', text: 'The yellow box is only for you: what the agent checked, and its plan. It is never posted.' },
     { at: 'card', sel: '.sc-reply-box', text: 'The reply that would be posted. Click it to change the words.' },
     { at: 'card', sel: '.sc-seg', text: 'Pick what happens to this thread. The dashed button is the agent\'s suggestion.' },
-    { at: 'card', sel: '.sc-note', text: 'Tell the agent what to do differently. The note is never posted.' },
+    { at: 'card', sel: '.sc-note', text: 'A note tells the agent what to do differently, and is never posted. For example: "Also add a test for the empty list."' },
     { at: 'panel', sel: '.sc-status', text: 'This line always says whose turn it is.' },
     { at: 'panel', sel: '[data-sc-act=export]', text: 'Send when every thread is decided. The agent makes the fixes, and round 2 comes back here.' },
   ],
   'reply:2': [
     { at: 'card', sel: '.sc-seg', text: 'Publish posts this reply. Revise asks the agent for a new version, and Hold or Manual post nothing.' },
     { at: 'card', sel: '.sc-reply-box', text: 'This exact text is what gets posted. Click it to change the words.' },
+    { at: 'card', sel: '.sc-note', text: 'With Revise, say what to change. For example: "Mention the commit with the fix."' },
     { at: 'panel', sel: '[data-sc-act=export]', text: 'Send, and the agent pushes the commits and posts the replies you chose.' },
   ],
   'review:1': [
     { at: 'card', sel: null, text: 'A comment in your draft review on GitHub. Only you can see it.' },
+    { at: 'card', sel: '.sc-foryou', text: 'The yellow box is only for you: why the agent wrote this comment. It is never posted.' },
     { at: 'card', sel: '.sc-reply-box', text: 'The comment as it stands. Click it to change the words.' },
     { at: 'card', sel: '.sc-seg', text: 'Keep it, ask the agent to revise it, or drop it from the review.' },
+    { at: 'card', sel: '.sc-note', text: 'A note tells the agent what to change, and is never posted. For example: "Shorter, and link the docs page."' },
     { at: 'panel', sel: '.sc-yourreview', text: 'The main comment of your review. You decide it like the others.' },
     { at: 'panel', sel: '.sc-status-warn', text: "Do not press GitHub's Submit button yet. It would publish every comment, decided or not." },
     { at: 'panel', sel: '[data-sc-act=export]', text: 'Send when every comment is decided. The agent rewrites them, and round 2 comes back here.' },
@@ -601,11 +604,30 @@ const SC_TOURS = {
   'review:2': [
     { at: 'panel', sel: '.sc-submit', text: 'Choose what happens to the review: leave it as a draft, or let the agent submit it.' },
     { at: 'panel', sel: '.sc-yourreview .sc-card', text: 'The main comment goes out with the review. Revise asks the agent for a new version.' },
+    { at: 'card', sel: '.sc-note', text: 'With Revise, say what to change. For example: "Softer, this is only a nit."' },
     { at: 'panel', sel: '[data-sc-act=export]', text: 'Send, and the agent updates your review on GitHub.' },
   ],
 };
-
-/** The steps of the tour for a mode and round, or none. */
+// Before a tour starts by itself, it asks. A user who has seen no tour yet gets a welcome.
+const SC_TOUR_INTROS = {
+  'reply:1': { title: 'Replying to a review', text: 'The agent read the review threads on this pull request and wrote a proposal for each one. Nothing is posted until you decide.' },
+  'reply:2': { title: 'Round 2', text: 'The agent did what you decided. Now you choose which replies get posted.' },
+  'review:1': { title: 'Reviewing a pull request', text: 'The agent wrote a review of this pull request. It is a draft on GitHub that only you can see, and you decide each comment.' },
+  'review:2': { title: 'Round 2', text: 'The agent rewrote the comments you sent back. Now you choose what goes into the review, and how it is submitted.' },
+};
+function tourIntro(mode, round, firstEver) {
+  const intro = SC_TOUR_INTROS[`${mode}:${round}`];
+  if (!intro) return null;
+  return firstEver ? { ...intro, title: 'Welcome to Second Chair' } : intro;
+}
+function buildTourIntro(intro, count) {
+  return `<div class="sc-tour-title">${esc(intro.title)}</div>
+<div class="sc-tour-text">${richText(intro.text)}</div>
+<div class="sc-tour-text">Take a short tour of this screen? ${count} steps. You can start it later with ? in the panel.</div>
+<div class="sc-tour-foot"><span class="sc-grow"></span>
+  <button type="button" class="sc-btn" data-sc-act="tourskip">Not now</button>
+  <button type="button" class="sc-btn sc-on" data-sc-act="tournext">Show me</button></div>`;
+}
 function tourSteps(mode, round) {
   return SC_TOURS[`${mode}:${round}`] ?? [];
 }
@@ -694,7 +716,8 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-tour-tip.sc-tip-below::before{top:-7px;left:var(--sc-arrow,24px);border-top-width:1px;border-left-width:1px}
 .sc-tour-tip.sc-tip-above::before{bottom:-7px;left:var(--sc-arrow,24px);border-bottom-width:1px;border-right-width:1px}
 .sc-tour-tip.sc-tip-left::before{right:-7px;top:var(--sc-arrow,20px);border-top-width:1px;border-right-width:1px}
-.sc-tour-text{margin-bottom:10px}.sc-tour-foot{display:flex;align-items:center;gap:8px;font-size:12px}
+.sc-tour-text{margin-bottom:10px}.sc-tour-title{font-weight:600;font-size:15px;margin-bottom:6px}
+.sc-tour-tip.sc-tip-center{width:360px}.sc-tour-tip.sc-tip-center::before{display:none}.sc-tour-foot{display:flex;align-items:center;gap:8px;font-size:12px}
 .sc-tour-foot .sc-btn{margin-left:0;border-radius:6px}
 .sc-yourreview-body{padding:10px 14px;border-bottom:1px solid var(--borderColor-default,#d0d7de)}
 .sc-submit{margin-top:4px}.sc-submit .sc-seg{flex-wrap:wrap}
@@ -1308,19 +1331,41 @@ function secondChairBootstrap() {
     return el && el.getClientRects().length ? el : null;
   }
 
+  /** The part of `el` that is on screen: cut by the window and by every box around it that scrolls or clips. */
+  function shownRect(el) {
+    const r = el.getBoundingClientRect();
+    let { left, top, right, bottom } = r;
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (getComputedStyle(p).overflowY === 'visible') continue;
+      const c = p.getBoundingClientRect();
+      left = Math.max(left, c.left); top = Math.max(top, c.top); right = Math.min(right, c.right); bottom = Math.min(bottom, c.bottom);
+    }
+    left = Math.max(left, 0); top = Math.max(top, 0); right = Math.min(right, innerWidth); bottom = Math.min(bottom, innerHeight);
+    return { left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+  }
+
   /** Lights the target and puts the bubble next to it: left of the panel, else below, else above. */
   function placeTour() {
     if (!tour) return;
-    const el = tourTarget(tour.steps[tour.index]);
     const layer = document.body.querySelector(':scope > .sc-tour');
-    if (!el || !layer) return;
-    const r = el.getBoundingClientRect();
-    const pad = 6;
-    Object.assign(layer.querySelector('.sc-tour-hole').style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+    if (!layer) return;
     const tip = layer.querySelector('.sc-tour-tip');
+    // The question before the tour has its own width, so the class goes on before the bubble is measured.
+    tip.classList.toggle('sc-tip-center', tour.index < 0);
     const w = tip.offsetWidth;
     const h = tip.offsetHeight;
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+    if (tour.index < 0) {
+      // The whole page dims and the bubble sits in the middle.
+      Object.assign(layer.querySelector('.sc-tour-hole').style, { left: `${innerWidth / 2}px`, top: `${innerHeight / 2}px`, width: '0px', height: '0px' });
+      Object.assign(tip.style, { left: `${(innerWidth - w) / 2}px`, top: `${clamp((innerHeight - h) / 2, 8, innerHeight - h - 8)}px` });
+      return;
+    }
+    const el = tourTarget(tour.steps[tour.index]);
+    if (!el) return;
+    const r = shownRect(el);
+    const pad = 6;
+    Object.assign(layer.querySelector('.sc-tour-hole').style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
     let side;
     let left;
     let top;
@@ -1339,21 +1384,29 @@ function secondChairBootstrap() {
     Object.assign(tip.style, { left: `${left}px`, top: `${clamp(top, 8, innerHeight - h - 8)}px` });
   }
 
+  /** Shows step `index`; -1 is the question before the tour. */
   function showTourStep(index) {
     if (!tour) return;
     if (index >= tour.steps.length) {
       endTour();
       return;
     }
+    if (index < 0 && !tour.intro) index = 0;
     tour.index = index;
     const step = tour.steps[index];
-    if (step.at === 'panel' && !panelShown) {
+    if (step && step.at === 'panel' && !panelShown) {
       panelShown = true;
       renderPanel();
     }
-    const el = tourTarget(step);
-    if (el) el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const el = step && tourTarget(step);
+    if (el) {
+      // A target taller than its scroll box shows its top; centring it would push the top out of sight.
+      const box = el.parentElement?.closest('.sc-list') ?? null;
+      const room = box ? box.clientHeight : innerHeight;
+      el.scrollIntoView({ block: el.getBoundingClientRect().height > room * 0.8 ? 'start' : 'center', inline: 'nearest' });
+    }
     let layer = document.body.querySelector(':scope > .sc-tour');
+    const fresh = !layer;
     if (!layer) {
       layer = document.createElement('div');
       layer.className = 'sc-tour';
@@ -1362,8 +1415,12 @@ function secondChairBootstrap() {
       layer.innerHTML = '<div class="sc-tour-hole"></div><div class="sc-tour-tip" aria-live="polite"></div>';
       document.body.appendChild(layer);
     }
-    layer.querySelector('.sc-tour-tip').innerHTML = buildTourTip(step, index, tour.steps.length);
+    layer.querySelector('.sc-tour-tip').innerHTML = index < 0 ? buildTourIntro(tour.intro, tour.steps.length) : buildTourTip(step, index, tour.steps.length);
+    // A new bubble appears in place; only later steps glide.
+    const tip = layer.querySelector('.sc-tour-tip');
+    if (fresh) tip.style.transition = 'none';
     placeTour();
+    if (fresh) requestAnimationFrame(() => requestAnimationFrame(() => { tip.style.transition = ''; }));
     layer.querySelector('[data-sc-act=tournext]')?.focus({ preventScroll: true });
   }
 
@@ -1371,7 +1428,7 @@ function secondChairBootstrap() {
    * Starts the tour of the screen in front of the user: the mode and round on the page. Steps whose part of
    * Second Chair is not on this page are left out.
    */
-  function startTour() {
+  function startTour(ask = false) {
     if (!state) return;
     const p = state.payload;
     const defs = tourSteps(modeOf(p), p.round);
@@ -1381,8 +1438,11 @@ function secondChairBootstrap() {
     }
     const steps = defs.filter((d) => tourTarget(d));
     if (!steps.length) return;
-    tour = { key: tourKey(modeOf(p), p.round), steps, index: 0 };
-    showTourStep(0);
+    // Started by itself, the tour first asks. A user who has seen no tour yet also gets a welcome.
+    const firstEver = Object.keys(SC_TOURS).every((k) => !GM_getValue(`sc:tour:${k}`, null));
+    const intro = ask ? tourIntro(modeOf(p), p.round, firstEver) : null;
+    tour = { key: tourKey(modeOf(p), p.round), steps, intro, index: 0 };
+    showTourStep(intro ? -1 : 0);
   }
 
   /** Ends the tour; `seen` remembers it, so it does not start by itself again. */
@@ -1399,7 +1459,7 @@ function secondChairBootstrap() {
     if (GM_getValue(key, null) || toursTried.has(key)) return;
     toursTried.add(key);
     // Let GitHub and the cards settle first.
-    setTimeout(() => { if (!tour && state && tourKey(modeOf(state.payload), state.payload.round) === key) startTour(); }, 600);
+    setTimeout(() => { if (!tour && state && tourKey(modeOf(state.payload), state.payload.round) === key) startTour(true); }, 600);
   }
 
   addEventListener('resize', () => placeTour());

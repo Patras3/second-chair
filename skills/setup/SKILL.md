@@ -15,5 +15,5 @@ description: Use when the user installs Second Chair, when its cards do not show
    - Install Tampermonkey or Violentmonkey.
    - Chrome or Edge: open the extension's details page and turn on "Allow user scripts". On older versions turn on developer mode in `chrome://extensions` instead.
    - Open the userscript URL that doctor printed and confirm the install.
-4. Ask the user to open any pull request on GitHub. A small pill with a chair icon at the bottom right means it works. The first time cards show, a short live tour points at each part. The **?** in the side panel starts it again.
+4. Ask the user to open any pull request on GitHub. A small pill with a chair icon at the bottom right means it works. The first time cards show, Second Chair offers a short live tour that points at each part. The **?** in the side panel starts it again.
 5. Tell the user what to run next in Claude Code: `/second-chair:respond <PR>` to answer the review on their own pull request, or `/second-chair:review <PR>` to review someone else's.

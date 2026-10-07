@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -607,7 +607,7 @@ test('a review comment folded on GitHub says to decide it here', () => {
 });
 
 test('each screen has a short tour that points at Second Chair, never at GitHub', () => {
-  const counts = { 'reply:1': 7, 'reply:2': 3, 'review:1': 6, 'review:2': 3 };
+  const counts = { 'reply:1': 7, 'reply:2': 4, 'review:1': 8, 'review:2': 4 };
   for (const [key, n] of Object.entries(counts)) {
     const [mode, round] = key.split(':');
     const steps = tourSteps(mode, Number(round));
@@ -625,6 +625,32 @@ test('each screen has a short tour that points at Second Chair, never at GitHub'
   assert.ok(tourSteps('review', 2).some((st) => st.sel === '.sc-submit'));
   assert.deepEqual(tourSteps('other', 1), []);
   assert.equal(tourKey('review', 2), 'sc:tour:review:2');
+});
+
+test('every tour shows the yellow box and a note for the agent with an example', () => {
+  for (const [mode, round] of [['reply', 1], ['review', 1]]) {
+    const box = tourSteps(mode, round).find((st) => st.sel === '.sc-foryou');
+    assert.ok(box && /yellow box/.test(box.text) && /never posted/.test(box.text), `${mode}:${round} explains the yellow box`);
+  }
+  for (const [mode, round] of [['reply', 1], ['reply', 2], ['review', 1], ['review', 2]]) {
+    const note = tourSteps(mode, round).find((st) => st.sel === '.sc-note');
+    assert.ok(note && /For example: "[^"]+"/.test(note.text), `${mode}:${round} gives an example note`);
+  }
+});
+
+test('the tour first asks whether to start, and welcomes a first-time user', () => {
+  assert.match(tourIntro('reply', 1, true).title, /Welcome to Second Chair/);
+  assert.doesNotMatch(tourIntro('reply', 1, false).title, /Welcome/);
+  assert.match(tourIntro('review', 1, false).text, /draft/);
+  assert.match(tourIntro('review', 2, false).title, /Round 2/);
+  assert.equal(tourIntro('other', 1, true), null);
+  const h = buildTourIntro(tourIntro('reply', 1, true), 7);
+  assert.match(h, /Welcome to Second Chair/);
+  assert.match(h, /data-sc-act="tournext"[^>]*>Show me/);
+  assert.match(h, /data-sc-act="tourskip"[^>]*>Not now/);
+  assert.match(h, /7 steps/);
+  assert.match(h, /\? in the panel/);
+  assert.doesNotMatch(h, / of 7/);
 });
 
 test('the tour bubble says where you are and how to move on', () => {

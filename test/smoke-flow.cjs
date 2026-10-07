@@ -66,6 +66,10 @@ async function decideAndSend(page, key) {
   const tour = await openPage(browser, port, 4, {});
   await tour.waitForSelector('.sc-tour .sc-tour-tip');
   const tip = () => text(tour, '.sc-tour-tip');
+  check(/Welcome to Second Chair/.test(await tip()) && /7 steps/.test(await tip()) && !/ of 7/.test(await tip()), 'a first-time user is welcomed and asked before the tour');
+  const mid = await tour.evaluate(() => { const t = document.querySelector('.sc-tour-tip').getBoundingClientRect(); return t.left + t.width / 2 - innerWidth / 2; });
+  check(Math.abs(mid) < 4, `the question sits in the middle of the page (${Math.round(mid)}px off)`);
+  await tour.click('[data-sc-act=tournext]');
   // The light moves with a short animation; measure once it has settled.
   const litInside = async (sel) => (await tour.waitForTimeout(350)) ?? tour.evaluate((q) => {
     const hole = document.querySelector('.sc-tour-hole').getBoundingClientRect();
@@ -97,11 +101,20 @@ async function decideAndSend(page, key) {
   await tour2.click('.sc-toggle');
   await tour2.click('[data-sc-act=tour]');
   await tour2.waitForSelector('.sc-tour .sc-tour-tip');
+  check(/1 of 7/.test(await text(tour2, '.sc-tour-tip')), '? starts the tour without asking');
   for (let i = 0; i < 6; i++) await tour2.click('[data-sc-act=tournext]');
   check(/7 of 7/.test(await text(tour2, '.sc-tour-tip')) && await tour2.locator('[data-sc-act=tournext]', { hasText: 'Done' }).count() === 1, '? starts it again, and the last step says Done');
   await tour2.click('[data-sc-act=tournext]');
   check(await tour2.locator('.sc-tour').count() === 0, 'Done ends it');
   await tour2.close();
+
+  // 0a. Not now remembers the answer; on a later screen the question has no welcome.
+  const later = await openPage(browser, port, 4, { 'sc:tour:review:1': '1' });
+  await later.waitForSelector('.sc-tour .sc-tour-tip');
+  check(!/Welcome/.test(await text(later, '.sc-tour-tip')) && /Replying to a review/.test(await text(later, '.sc-tour-tip')), 'a user who saw a tour before is asked without the welcome');
+  await later.click('[data-sc-act=tourskip]');
+  check(await later.locator('.sc-tour').count() === 0 && await later.evaluate(() => window.__store['sc:tour:reply:1'] !== undefined), 'Not now closes it and remembers the answer');
+  await later.close();
 
   // 0b. A pull request without proposals has no tour and keeps the panel closed.
   const empty = await openPage(browser, port, 5, { 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) });
@@ -224,8 +237,31 @@ async function decideAndSend(page, key) {
   check(/Then it submits it as Comment/.test(await text(rv, '.sc-status')), 'the status says the agent will submit it');
   const fresh = await openPage(browser, port, 11, {});
   await fresh.waitForSelector('.sc-tour .sc-tour-tip');
-  check(/1 of 3/.test(await text(fresh, '.sc-tour-tip')) && /leave it as a draft, or let the agent submit it/.test(await text(fresh, '.sc-tour-tip')), 'review round 2 has its own tour, on the submit choice');
+  await fresh.click('[data-sc-act=tournext]');
+  check(/1 of 4/.test(await text(fresh, '.sc-tour-tip')) && /leave it as a draft, or let the agent submit it/.test(await text(fresh, '.sc-tour-tip')), 'review round 2 has its own tour, on the submit choice');
   await fresh.close();
+
+  // 10b. A review body taller than the panel: the tour lights its top, in view, and points at it.
+  const long = Array.from({ length: 60 }, (_, i) => `Point ${i + 1}: something to change.`).join('\n\n');
+  await api('PUT', '/api/proposals', { tool: 'second-chair', kind: 'proposals', mode: 'review', repo: 'acme/w', pr: 13, round: 1, head: 'h1', items: [
+    { thread_id: 'BODY', comment_id: null, verdict: 'post', reply_en: long },
+    { thread_id: 'C1', comment_id: 11, path: 'a.js', line: 1, verdict: 'post', reply_en: 'Evict here.', context: 'The cache never evicts.' },
+  ] });
+  const tall = await openPage(browser, port, 13, { 'sc:tour:reply:1': '1' });
+  await tall.waitForSelector('.sc-tour .sc-tour-tip');
+  await tall.click('[data-sc-act=tournext]');
+  for (let i = 0; i < 5; i++) await tall.click('[data-sc-act=tournext]');
+  await tall.waitForTimeout(350);
+  check(/6 of 8/.test(await text(tall, '.sc-tour-tip')) && /main comment/.test(await text(tall, '.sc-tour-tip')), 'the review tour reaches the main comment');
+  const fit = await tall.evaluate(() => {
+    const hole = document.querySelector('.sc-tour-hole').getBoundingClientRect();
+    const tip = document.querySelector('.sc-tour-tip');
+    const arrow = tip.getBoundingClientRect().top + parseFloat(getComputedStyle(tip).getPropertyValue('--sc-arrow'));
+    return { top: hole.top, bottom: hole.bottom, h: innerHeight, arrow };
+  });
+  check(fit.top >= 0 && fit.bottom <= fit.h && fit.bottom - fit.top < fit.h * 0.9, `the lit part fits on the screen (${Math.round(fit.top)} to ${Math.round(fit.bottom)})`);
+  check(fit.arrow >= fit.top && fit.arrow <= fit.bottom, 'and the arrow points into it');
+  await tall.close();
 
   // 11. Every control works inside page code that eats clicks, and editing is plain to see.
   await api('PUT', '/api/proposals', proposals(12, 1));
