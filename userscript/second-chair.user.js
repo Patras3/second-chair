@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Second Chair
 // @namespace    https://github.com/Patras3/second-chair
-// @version      1.0.1
+// @version      1.1.0
 // @icon         data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%20fill=%22none%22%20stroke=%22%231f2328%22%20stroke-width=%221.5%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22%3E%3Cpath%20d=%22M5.75%201.75%205.25%209.25M3.75%209.25h8.5M5.25%209.25l-1%205M11%209.25l1%205%22/%3E%3C/svg%3E
 // @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*

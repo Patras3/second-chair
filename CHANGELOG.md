@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
+
+Not released yet: no tag and no GitHub Release.
 
 Added:
 
