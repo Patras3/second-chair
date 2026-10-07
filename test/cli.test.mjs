@@ -524,3 +524,31 @@ test('isOlder compares versions, and a missing version counts as older', () => {
   assert.equal(isOlder(undefined, '1.0.0'), true);
   assert.equal(isOlder('garbage', '1.0.0'), true);
 });
+
+test('push links the tab where the cards are, and prints the server refusal', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port) };
+  const server = await startServer({ port, root, log: () => {} });
+  const file = join(root, 'p.json');
+  const H = { 'Content-Type': 'application/json', 'X-Second-Chair': '1' };
+  const base = { tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'h' };
+  try {
+    await writeFile(file, JSON.stringify({ ...base, mode: 'review', items: [{ thread_id: 'C1', comment_id: 1, verdict: 'post', reply_en: 'x' }] }));
+    assert.match((await run(process.execPath, [BIN, 'push', file], { env })).stdout, /open https:\/\/github\.com\/acme\/w\/pull\/7\/files\n/);
+    await writeFile(file, JSON.stringify({ ...base, pr: 8, items: [{ thread_id: 'T1', comment_id: 1, verdict: 'reply', reply_en: 'x' }] }));
+    assert.match((await run(process.execPath, [BIN, 'push', file], { env })).stdout, /open https:\/\/github\.com\/acme\/w\/pull\/8\n/);
+    const d = { tool: 'second-chair', kind: 'decisions', repo: 'acme/w', pr: 8, round: 1, head: 'h', decisions: [{ thread_id: 'T1', decision: 'reply', note: '' }] };
+    const post = () => fetch(`http://127.0.0.1:${port}/api/decisions`, { method: 'POST', headers: H, body: JSON.stringify(d) });
+    await post();
+    await fetch(`http://127.0.0.1:${port}/api/decisions?repo=acme/w&pr=8&round=1`, { headers: H });
+    await post();
+    await writeFile(file, JSON.stringify({ ...base, pr: 8, round: 2, items: [{ thread_id: 'T1', comment_id: 1, verdict: 'publish', reply_en: 'x' }] }));
+    const r = await run(process.execPath, [BIN, 'push', file], { env }).catch((e) => e);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /^second-chair: refused: the user changed the round 1 decisions after you read them \(revision 2\)/);
+  } finally {
+    server.close();
+    await cleanup(root);
+  }
+});
