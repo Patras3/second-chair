@@ -21,7 +21,8 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   port = server.address().port;
   let n = 0;
-  server.on('request', createHandler({ store: createStore(root), port, now: () => `t${++n}` }));
+  // Padded, so the times sort as strings the way they do in ISO form.
+  server.on('request', createHandler({ store: createStore(root), port, now: () => `t${String(++n).padStart(6, '0')}` }));
   base = `http://127.0.0.1:${port}`;
 });
 after(async () => {
@@ -201,4 +202,88 @@ test('with a pid file, the server writes its pid once it listens, and removes th
   }
   assert.equal(await readFile(pidFile, 'utf8').catch(() => 'gone'), 'gone');
   await rm(dir, { recursive: true, force: true });
+});
+
+const decisionsFor = (p, over = {}) => ({ tool: 'second-chair', kind: 'decisions', repo: p.repo, pr: p.pr, round: p.round, head: p.head,
+  decisions: p.items.map((it) => ({ thread_id: it.thread_id, decision: p.round === 1 ? 'reply' : 'publish', note: '' })), ...over });
+const round2 = (pr) => proposals({ pr, round: 2, items: [{ thread_id: 'T1', verdict: 'publish', reply_en: 'x' }, { thread_id: 'T2', verdict: 'hold', reply_en: 'y' }] });
+
+test('a resend becomes revision 2, and a read without peek picks it up', async () => {
+  const p = proposals({ pr: 101 });
+  await call('PUT', '/api/proposals', p);
+  assert.deepEqual((await call('POST', '/api/decisions', decisionsFor(p))).body, { ok: true, revision: 1 });
+  const peeked = await call('GET', '/api/decisions?repo=acme/w&pr=101&round=1&peek=1');
+  assert.equal(peeked.body.picked_up_at, null);
+  const read = await call('GET', '/api/decisions?repo=acme/w&pr=101&round=1');
+  assert.ok(read.body.picked_up_at);
+  assert.equal((await call('POST', '/api/decisions', decisionsFor(p))).body.revision, 2);
+  assert.equal((await call('GET', '/api/decisions?repo=acme/w&pr=101&round=1&peek=1')).body.picked_up_at, null);
+});
+
+test('push of round 2 waits until the agent read a changed round 1', async () => {
+  const p = proposals({ pr: 102 });
+  await call('PUT', '/api/proposals', p);
+  await call('POST', '/api/decisions', decisionsFor(p));
+  await call('GET', '/api/decisions?repo=acme/w&pr=102&round=1');
+  await call('POST', '/api/decisions', decisionsFor(p));
+  const refused = await call('PUT', '/api/proposals', round2(102));
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /changed the round 1 decisions after you read them \(revision 2\).*second-chair get --repo acme\/w --pr 102 --round 1/);
+  await call('GET', '/api/decisions?repo=acme/w&pr=102&round=1');
+  assert.equal((await call('PUT', '/api/proposals', round2(102))).status, 200);
+});
+
+test('re-pushing round 2 after a Revise also waits for the read', async () => {
+  const r2 = round2(103);
+  await call('PUT', '/api/proposals', r2);
+  const d = decisionsFor(r2, { decisions: [{ thread_id: 'T1', decision: 'revise', note: 'shorter' }, { thread_id: 'T2', decision: 'hold' }] });
+  await call('POST', '/api/decisions', d);
+  await call('GET', '/api/decisions?repo=acme/w&pr=103&round=2');
+  await call('POST', '/api/decisions', d);
+  assert.equal((await call('PUT', '/api/proposals', r2)).status, 409);
+});
+
+test('a resend is refused once the next round exists', async () => {
+  const p = proposals({ pr: 104 });
+  await call('PUT', '/api/proposals', p);
+  await call('POST', '/api/decisions', decisionsFor(p));
+  await call('GET', '/api/decisions?repo=acme/w&pr=104&round=1');
+  await call('PUT', '/api/proposals', round2(104));
+  const r = await call('POST', '/api/decisions', decisionsFor(p));
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /already sent round 2/);
+});
+
+test('a decisions file from 1.0 counts as revision 1, picked up', async () => {
+  const p = proposals({ pr: 105 });
+  await call('PUT', '/api/proposals', p);
+  await writeFile(join(root, 'acme', 'w', '105', 'r1-decisions.json'), JSON.stringify({ ...decisionsFor(p), received_at: 't000000' }));
+  assert.equal((await call('PUT', '/api/proposals', round2(105))).status, 200);
+});
+
+test('drafted ids are stored per pull request and replaced as a whole', async () => {
+  assert.deepEqual((await call('GET', '/api/drafted?repo=acme/w&pr=106')).body, { ids: [] });
+  assert.equal((await call('POST', '/api/drafted', { repo: 'acme/w', pr: 106, ids: [5, 6] })).status, 200);
+  assert.equal((await call('POST', '/api/drafted', { repo: 'acme/w', pr: 106, ids: [7] })).status, 200);
+  assert.deepEqual((await call('GET', '/api/drafted?repo=acme/w&pr=106')).body, { ids: [7] });
+  assert.equal((await call('POST', '/api/drafted', { repo: 'acme/w', pr: 106, ids: ['x'] })).status, 400);
+  assert.equal((await call('POST', '/api/drafted', { repo: '../x', pr: 106, ids: [1] })).status, 400);
+});
+
+test('the review submit is recorded under REVIEW', async () => {
+  await call('PUT', '/api/proposals', proposals({ pr: 107, mode: 'review', round: 2, items: [{ thread_id: 'BODY', comment_id: null, verdict: 'post', reply_en: 'b' }] }));
+  assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 107, round: 2, thread_id: 'REVIEW', action: 'submitted', event: 'COMMENT' })).status, 200);
+  assert.equal((await call('GET', '/api/published?repo=acme/w&pr=107&round=2')).body.items.REVIEW.event, 'COMMENT');
+  assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 107, round: 2, thread_id: 'REVIEW', action: 'submitted', event: 'MERGE' })).status, 409);
+  await call('PUT', '/api/proposals', round2(108));
+  assert.equal((await call('POST', '/api/published', { repo: 'acme/w', pr: 108, round: 2, thread_id: 'REVIEW', action: 'submitted', event: 'COMMENT' })).status, 409, 'not in reply mode');
+});
+
+test('status shows the revision and the pick-up', async () => {
+  const p = proposals({ pr: 109 });
+  await call('PUT', '/api/proposals', p);
+  await call('POST', '/api/decisions', decisionsFor(p));
+  const row = (await call('GET', '/api/status')).body.find((s) => s.pr === 109);
+  assert.equal(row.revision, 1);
+  assert.equal(row.picked_up_at, null);
 });

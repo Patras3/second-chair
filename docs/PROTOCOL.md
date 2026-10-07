@@ -150,6 +150,8 @@ The userscript sends this when the user clicks **Send decisions**. `wait` and `g
 | `repo`, `pr`, `round`, `head` | as in the proposals | Copied from the proposals they answer. |
 | `exported_at` | string | When the user sent them. |
 | `received_at` | string | Set by the server. |
+| `revision` | integer | Set by the server. `1` for the first send of a round, one more for every later send of the same round. |
+| `picked_up_at` | string or null | Set by the server the first time the agent reads this revision with `wait` or `get`. The page reads with `peek=1`, which does not count. |
 | `decisions[].thread_id` | string | The item. |
 | `decisions[].comment_id` | integer or null | Copied from the item. `publish` takes the target from the proposals, not from here. |
 | `decisions[].proposed` | string or null | The item's `verdict`. |
@@ -173,6 +175,12 @@ The server refuses decisions with `409` when:
 - `submit` is set outside review mode or round 2, or is not `COMMENT`, `APPROVE` or `REQUEST_CHANGES`;
 - an item has no decision.
 
+The server also refuses a send with `409` once the agent pushed the next round after the earlier send: "the agent already sent round 2; decide there".
+
+### Changed decisions
+
+The user can send a round again while the agent works on it (**Edit and send again** on the page). Each send is a new `revision`. The agent may already have read the earlier one, so the server makes sure it sees the change: `PUT /api/proposals` refuses a push with `409` while round R or R-1 holds a revision above 1 that nobody read yet. The message names the `get` command to run. A decisions file from 1.0 has no `revision`, and counts as revision 1, read.
+
 When the server is not running, the page copies the decisions to the clipboard instead. The user pastes them to the agent. The agent saves them to a file and runs `second-chair put-decisions <file>` once the server runs. The server checks them as above, and the work goes on as if the page had sent them.
 
 ## Server API
@@ -193,15 +201,17 @@ Rules for every request:
 | `GET /health` | | `200 {"ok": true, "tool": "second-chair", "pid": N, "version": "1.0.0"}`. `pid` is the server's process id. `stop` signals a process only when this `pid` matches the pid file. `version` is the version in the server's `package.json`. `start` restarts a server whose version is older than its own, or missing. It keeps a newer server. Needs no `X-Second-Chair` header. |
 | `GET /second-chair.user.js` | | `200` with the userscript, with the server's port written into it. Needs no `X-Second-Chair` header. |
 | `GET /api/proposals` | `?repo=O/N&pr=N[&round=R]` | `200` with the payload, `400` without a valid `repo` and `pr` or with a `round` that is not a whole number of 1 or more, `404` when there is none. Without `round`: the most recently pushed round, so a new round 1 wins over an older round 2. |
-| `PUT /api/proposals` | a proposals payload | `200 {"ok": true, "published_at": "…"}`, or `400` with the reason. It replaces that round's proposals and deletes that round's decisions. |
-| `GET /api/decisions` | `?repo=O/N&pr=N&round=R` | `200` with the decisions, `400` without `repo`, `pr` and `round`, `404` when there are none yet. |
-| `POST /api/decisions` | a decisions payload | `200 {"ok": true}`, or `409` with the reason (see above). |
+| `PUT /api/proposals` | a proposals payload | `200 {"ok": true, "published_at": "…"}`, `400` with the reason, or `409` while round R or R-1 has a changed revision the agent has not read (see [Changed decisions](#changed-decisions)). It replaces that round's proposals and deletes that round's decisions. |
+| `GET /api/decisions` | `?repo=O/N&pr=N&round=R[&peek=1]` | `200` with the decisions, `400` without `repo`, `pr` and `round`, `404` when there are none yet. Without `peek=1` the first read of a revision sets its `picked_up_at`. |
+| `POST /api/decisions` | a decisions payload | `200 {"ok": true, "revision": N}`, or `409` with the reason (see above). |
 | `POST /api/close` | `{"repo": "O/N", "pr": N}` | `200 {"ok": true, "closed_at": "…"}`, `400` without `repo` and `pr`, `404` when the pull request has no proposals. |
 | `GET /api/published` | `?repo=O/N&pr=N&round=R` | `200 {"items": {"<thread_id>": {"action": "…", "url": "…", "at": "…"}}}`, `400` without `repo`, `pr` and `round`. |
-| `POST /api/published` | `{"repo", "pr", "round", "thread_id", "action", "url"}` | `200 {"ok": true}`, or `409` for an unknown pull request, round or `thread_id`, or an empty `action`. |
-| `GET /api/status` | | `200` with one entry per pull request and round: `repo`, `pr`, `round`, `head`, `items`, `published_at`, `decided_at`, `closed_at`. |
+| `POST /api/published` | `{"repo", "pr", "round", "thread_id", "action", "url"}` | `200 {"ok": true}`, or `409` for an unknown pull request, round or `thread_id`, or an empty `action`. In review mode, `{"thread_id": "REVIEW", "action": "submitted", "event": "COMMENT"}` records the submit. |
+| `GET /api/drafted` | `?repo=O/N&pr=N` | `200 {"ids": [...]}`: the pending comments that `draft` added for Second Chair. `400` without `repo` and `pr`. |
+| `POST /api/drafted` | `{"repo", "pr", "ids"}` | `200 {"ok": true}`. Replaces the list. `400` when an id is not a whole number of 1 or more. |
+| `GET /api/status` | | `200` with one entry per pull request and round: `repo`, `pr`, `round`, `head`, `items`, `published_at`, `decided_at`, `revision`, `picked_up_at`, `closed_at`. |
 
-`publish` records these actions in `/api/published`: `replied`, `dropped`, `updated`, `kept`, `body set` and `body cleared`.
+`publish` records these actions in `/api/published`: `replied`, `dropped`, `updated`, `kept`, `body set` and `body cleared`, and `submitted` under `REVIEW`.
 
 The server stores plain JSON files under the data directory (`SECOND_CHAIR_HOME`, by default `${XDG_DATA_HOME:-~/.local/share}/second-chair`):
 
@@ -210,6 +220,7 @@ The server stores plain JSON files under the data directory (`SECOND_CHAIR_HOME`
 <owner>/<name>/<pr>/r<round>-decisions.json
 <owner>/<name>/<pr>/r<round>-published.json
 <owner>/<name>/<pr>/closed.json
+<owner>/<name>/<pr>/drafted.json
 ```
 
 The same directory holds `server.log` from `second-chair start`, and `backups/` from `draft`. It also holds `server.pid` while a server that `start` launched runs. That server writes the file once it listens on the port, and removes it when it stops. On Windows, `stop` removes it, and so does the next `start` when the file names another process than the server on the port.
