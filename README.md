@@ -179,7 +179,7 @@ With the plugin alone, these commands run inside Claude Code. See [Where the com
 | `second-chair wait --repo O/N --pr N --round R [--timeout S]` | Waits until you send the decisions, then prints them. |
 | `second-chair get --repo O/N --pr N --round R` | Prints the decisions now, or exits with code 3. |
 | `second-chair put-decisions <decisions.json>` | Hands the decisions from the clipboard to the server. The page puts them there when the server is down. Prints the server's reason when it refuses them. |
-| `second-chair publish --repo O/N --pr N [--submit EVENT]` | Carries out the final round's decisions on GitHub, once. Only review mode takes `--submit`, with `COMMENT`, `APPROVE` or `REQUEST_CHANGES`. |
+| `second-chair publish --repo O/N --pr N [--submit EVENT]` | Carries out the final round's decisions on GitHub, once. In review mode it submits the review with the event you chose in the panel. `--submit` with `COMMENT`, `APPROVE` or `REQUEST_CHANGES` does the same, and must agree with your choice. It refuses a round 2 that asks for a new version. |
 | `second-chair close --repo O/N --pr N` | Marks the work on the pull request done. The page hides its cards. |
 | `second-chair status` | Lists the pull requests and rounds on the server. |
 

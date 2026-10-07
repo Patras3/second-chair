@@ -10,7 +10,7 @@ function fakeServer({ proposals, decisions }) {
     if (path.startsWith('/api/proposals')) return { status: 200, body: proposals };
     if (path.startsWith('/api/decisions')) return decisions ? { status: 200, body: decisions } : { status: 404, body: null };
     if (method === 'GET' && path.startsWith('/api/published')) return { status: 200, body: { items: structuredClone(published) } };
-    if (method === 'POST' && path === '/api/published') { published[body.thread_id] = { action: body.action, url: body.url }; return { status: 200, body: { ok: true } }; }
+    if (method === 'POST' && path === '/api/published') { published[body.thread_id] = { action: body.action, url: body.url, ...(body.event ? { event: body.event } : {}) }; return { status: 200, body: { ok: true } }; }
     throw new Error(`unexpected ${method} ${path}`);
   };
   return { api, published };
@@ -243,7 +243,7 @@ test('respond mode posts nothing while I have a pending review on the pull reque
 test('a body for a pending review that has none goes with the submit, and is refused without one', async () => {
   const srv = fakeServer({ proposals: reviewRound2, decisions: reviewDecisions() });
   const g1 = reviewGh([], '');
-  await assert.rejects(publish({ gh: g1.gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /Ask the user whether to submit the review now.*Nothing was posted/);
+  await assert.rejects(publish({ gh: g1.gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /user chose to leave the review as a draft.*Nothing was posted/);
   assert.equal(writes(g1.calls).length, 0);
 
   const g2 = reviewGh([{ match: has('reviews/901/events'), reply: {} }], '');
@@ -273,4 +273,52 @@ test('an unchanged comment counts as kept, and a comment gone from the review is
   assert.deepEqual(again.skipped, ['BODY', 'C1', 'C2']);
   assert.deepEqual(again.missing, ['C3'], 'a second run looks for it again');
   assert.equal(warnings.length, 2);
+});
+
+test('the submit the user chose in the panel is carried out and recorded', async () => {
+  const srv = fakeServer({ proposals: reviewRound2, decisions: { ...reviewDecisions(), submit: 'COMMENT' } });
+  const { gh, calls } = reviewGh([{ match: has('reviews/901/events'), reply: {} }]);
+  await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
+  assert.deepEqual(calls.find((c) => c.args.some((a) => a.endsWith('/events'))).input, { event: 'COMMENT' });
+  assert.deepEqual(srv.published.REVIEW, { action: 'submitted', url: null, event: 'COMMENT' });
+});
+
+test('a --submit that differs from the panel choice is refused before any change', async () => {
+  const srv = fakeServer({ proposals: reviewRound2, decisions: { ...reviewDecisions(), submit: 'COMMENT' } });
+  const { gh, calls } = reviewGh([{ match: has('reviews/901/events'), reply: {} }]);
+  await assert.rejects(publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, submit: 'APPROVE', log: () => {} }), /--submit APPROVE differs from the submit the user chose in the panel \(COMMENT\)/);
+  assert.equal(writes(calls).length, 0);
+});
+
+test('a round 2 that asks for a new version posts nothing', async () => {
+  const d = reviewDecisions();
+  d.decisions[1] = { ...d.decisions[1], decision: 'revise', note: 'shorter' };
+  const srv = fakeServer({ proposals: reviewRound2, decisions: d });
+  const { gh, calls } = reviewGh();
+  await assert.rejects(publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} }), /asks the agent for a new version of C1/);
+  assert.equal(writes(calls).length, 0);
+});
+
+test('a recorded submit is not sent again', async () => {
+  const srv = fakeServer({ proposals: reviewRound2, decisions: { ...reviewDecisions(), submit: 'COMMENT' } });
+  srv.published.REVIEW = { action: 'submitted', url: null, event: 'COMMENT' };
+  const { gh, calls } = reviewGh([{ match: has('reviews/901/events'), reply: {} }]);
+  await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
+  assert.ok(!calls.some((c) => c.args.some((a) => a.endsWith('/events'))));
+});
+
+test('a body the review lacks goes with the submit chosen in the panel', async () => {
+  const srv = fakeServer({ proposals: reviewRound2, decisions: { ...reviewDecisions(), submit: 'REQUEST_CHANGES' } });
+  const { gh, calls } = reviewGh([{ match: has('reviews/901/events'), reply: {} }], '');
+  await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
+  assert.deepEqual(calls.find((c) => c.args.some((a) => a.endsWith('/events'))).input, { event: 'REQUEST_CHANGES', body: 'Two notes.' });
+});
+
+test('a run after the submit finds nothing to do, though the review is no longer pending', async () => {
+  const srv = fakeServer({ proposals: reviewRound2, decisions: { ...reviewDecisions(), submit: 'COMMENT' } });
+  srv.published.REVIEW = { action: 'submitted', url: null, event: 'COMMENT' };
+  const { gh, calls } = fakeGh([noThreads, { match: has('api', 'user'), reply: { login: 'me' } }, { match: (a) => a.includes('--paginate'), reply: [[]] }]);
+  const r = await publish({ gh, api: srv.api, repo: 'octo-org/example', pr: 3, log: () => {} });
+  assert.deepEqual(r.skipped, ['BODY', 'C1', 'C2']);
+  assert.equal(writes(calls).length, 0);
 });

@@ -252,8 +252,9 @@ For a review of someone else's pull request.
 5. Rewrite each `revise` item as its note says.
 6. Write round 2 items with the final texts and `post` or `drop`. An item the user dropped in round 1 keeps `verdict: "drop"` with `auto: true`, because `publish` deletes only a comment that has a round 2 decision.
 7. `build --mode review --round 2`, `push`, then `wait --round 2`.
-8. `second-chair publish --repo O/N --pr N`. For `post` it sets the comment's text to `reply_en` when they differ. For `drop` it deletes the comment. The `BODY` item sets or clears the review body. It does not submit the review.
-9. `second-chair close --repo O/N --pr N`. Submitting the review is the user's move on GitHub. Add `--submit COMMENT`, `--submit APPROVE` or `--submit REQUEST_CHANGES` to `publish` only when the user asked for it.
+8. When the round 2 decisions hold a `revise`, rewrite those items and go back to step 7. `publish` refuses such decisions.
+9. `second-chair publish --repo O/N --pr N`. For `post` it sets the comment's text to `reply_en` when they differ. For `drop` it deletes the comment. The `BODY` item sets or clears the review body. When the decisions carry `submit`, it then submits the review with that event and records it under `REVIEW`. Without `submit`, the review stays a draft. `--submit COMMENT`, `--submit APPROVE` or `--submit REQUEST_CHANGES` submits too, when the user asked for it in the session. It must agree with the panel's choice.
+10. `second-chair close --repo O/N --pr N`. When the review stays a draft, submitting it is the user's move on GitHub.
 
 `publish` refuses to run when round 2 has no decisions. It prints what it did, item by item. A second run skips what is already recorded, so a failure halfway can be retried.
 
