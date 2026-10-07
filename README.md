@@ -27,9 +27,11 @@ Work through GitHub code reviews with your coding agent. Nothing gets posted wit
 2. **You decide.** Each proposal shows as a card under its thread on GitHub. Keep it, change the text, or tell the agent what to change.
 3. **The agent posts what you approved,** with your exact text.
 
-The side panel always says whose turn it is: yours, or the agent's. The first time Second Chair runs, the panel opens with a short guide. The **?** in the panel opens it again.
+The side panel always says whose turn it is: yours, or the agent's.
 
-<img src="docs/images/guide.png" width="420" alt="The guide in the side panel: the three steps, then the rounds and buttons of review mode">
+The first time you see the cards of a mode and round, a short live tour starts. The page dims, and one part of Second Chair at a time lights up with a short note next to it: the card, the text that would be posted, the buttons, the status line, Send. **Next** and **Back**, or the arrow keys, move through it, and **Skip** or Esc ends it. The **?** in the side panel starts it again.
+
+<img src="docs/images/tour.png" alt="The live tour: the page is dimmed, the Keep, Revise and Drop buttons of a card are lit, and a note next to them says what they do">
 
 ## Install
 
@@ -54,7 +56,7 @@ Then:
 2. Start a new Claude Code session. Its start hook runs the local server. Run `/second-chair:setup` in that session. It checks Node, `gh` and the server, and walks you through the browser steps.
 3. Open <http://127.0.0.1:7788/second-chair.user.js> in your browser. The script manager offers to install the script. Updates come from the same address.
 
-Open any pull request on github.com. A small pill with the Second Chair chair icon at the bottom right means it works. The guide opens the first time.
+Open any pull request on github.com. A small pill with the Second Chair chair icon at the bottom right means it works. The cards and a short tour show up once the agent proposes something.
 
 ### Where the command runs
 

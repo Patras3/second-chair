@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Second Chair
 // @namespace    https://github.com/Patras3/second-chair
-// @version      1.1.1
+// @version      1.1.2
 // @icon         data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%20fill=%22none%22%20stroke=%22%231f2328%22%20stroke-width=%221.5%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22%3E%3Cpath%20d=%22M5.75%201.75%205.25%209.25M3.75%209.25h8.5M5.25%209.25l-1%205M11%209.25l1%205%22/%3E%3C/svg%3E
 // @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*
@@ -573,55 +573,56 @@ function buildFilterBar(state, filterKey) {
   return `<div class="sc-tabbar">${tabs}<select class="sc-fdecision" data-sc-act="filterselect"><option value="">Decision</option>${options}</select></div>`;
 }
 
-// Bump when the guide says something new, so it shows once more to people who closed it.
-const SC_GUIDE_VERSION = 1;
+// The tour for each screen: a few steps, each pointing at a part of Second Chair's own cards or panel, never at
+// GitHub's markup. `at` says where to look: the card the tour shows, or the side panel. `sel` narrows it down.
+const SC_TOURS = {
+  'reply:1': [
+    { at: 'card', sel: null, text: "The agent's proposal for this thread. Nothing is posted yet." },
+    { at: 'card', sel: '.sc-foryou', text: 'Only you see this: what the agent checked, and its plan.' },
+    { at: 'card', sel: '.sc-reply-box', text: 'The reply that would be posted. Click it to change the words.' },
+    { at: 'card', sel: '.sc-seg', text: 'Pick what happens to this thread. The dashed button is the agent\'s suggestion.' },
+    { at: 'card', sel: '.sc-note', text: 'Tell the agent what to do differently. The note is never posted.' },
+    { at: 'panel', sel: '.sc-status', text: 'This line always says whose turn it is.' },
+    { at: 'panel', sel: '[data-sc-act=export]', text: 'Send when every thread is decided. The agent makes the fixes, and round 2 comes back here.' },
+  ],
+  'reply:2': [
+    { at: 'card', sel: '.sc-seg', text: 'Publish posts this reply. Revise asks the agent for a new version, and Hold or Manual post nothing.' },
+    { at: 'card', sel: '.sc-reply-box', text: 'This exact text is what gets posted. Click it to change the words.' },
+    { at: 'panel', sel: '[data-sc-act=export]', text: 'Send, and the agent pushes the commits and posts the replies you chose.' },
+  ],
+  'review:1': [
+    { at: 'card', sel: null, text: 'A comment in your draft review on GitHub. Only you can see it.' },
+    { at: 'card', sel: '.sc-reply-box', text: 'The comment as it stands. Click it to change the words.' },
+    { at: 'card', sel: '.sc-seg', text: 'Keep it, ask the agent to revise it, or drop it from the review.' },
+    { at: 'panel', sel: '.sc-yourreview', text: 'The main comment of your review. You decide it like the others.' },
+    { at: 'panel', sel: '.sc-status-warn', text: "Do not press GitHub's Submit button yet. It would publish every comment, decided or not." },
+    { at: 'panel', sel: '[data-sc-act=export]', text: 'Send when every comment is decided. The agent rewrites them, and round 2 comes back here.' },
+  ],
+  'review:2': [
+    { at: 'panel', sel: '.sc-submit', text: 'Choose what happens to the review: leave it as a draft, or let the agent submit it.' },
+    { at: 'panel', sel: '.sc-yourreview .sc-card', text: 'The main comment goes out with the review. Revise asks the agent for a new version.' },
+    { at: 'panel', sel: '[data-sc-act=export]', text: 'Send, and the agent updates your review on GitHub.' },
+  ],
+};
 
-/** The guide: who does what, then the chosen mode's rounds and buttons. `number` fills in the commands. */
-function buildGuide(mode, number) {
-  const steps = [
-    ['The agent proposes', 'a reply or a comment for every thread, next to it on GitHub.'],
-    ['You decide', 'each one here: keep it, change the text, or tell the agent what to change.'],
-    ['The agent posts what you approved', 'with your exact text. Nothing reaches GitHub without your decision.'],
-  ].map(([t, d], i) => `<li><span class="sc-step-n">${i + 1}</span><span><b>${t}</b> ${d}</span></li>`).join('');
-  const tab = (key) => `<button type="button" class="sc-ftab${mode === key ? ' sc-ftab-on' : ''}" data-sc-act="guidetab" data-sc-val="${key}" aria-selected="${mode === key}">${SC_MODE_NAME[key]}</button>`;
-  const buttons = (round) => SC_DECISIONS[mode][round].map((b) => `<dt>${esc(b.label)}</dt><dd>${esc(b.help)}</dd>`).join('');
-  const m = mode === 'review'
-    ? {
-      when: 'Review someone else\'s pull request.',
-      cmd: `/second-chair:review ${number}`,
-      r1: 'decide each comment of your draft review. Only you see the draft on GitHub.',
-      r2: 'approve the final texts, and choose what happens to the review: leave it as a draft, or submit it.',
-      extra: `<table class="sc-who"><tr><th>When</th><th>Who</th><th>On GitHub</th></tr>
-<tr><td>Before round 1</td><td>the agent</td><td>Its comments go into your draft review. Only you see them, marked Pending.</td></tr>
-<tr><td>Rounds 1 and 2</td><td>you, here</td><td>Nothing changes.</td></tr>
-<tr><td>After round 2</td><td>the agent</td><td>It edits and removes draft comments to match your decisions.</td></tr>
-<tr><td>Submit</td><td>you choose</td><td>Leave as draft, and submit it yourself on GitHub. Or pick Comment, Approve or Request changes, and the agent submits it.</td></tr></table>
-<p class="sc-warn">${esc("GitHub's own Submit button makes the review public. Leave it until Second Chair says the review is ready, or choose the submit in round 2.")}</p>`,
-    }
-    : {
-      when: 'Answer the review threads on your own pull request.',
-      cmd: `/second-chair:respond ${number}`,
-      r1: 'decide what to do with each thread. The agent makes the fixes and commits them, without pushing.',
-      r2: 'approve the final replies. The agent pushes the commits and posts the replies you chose to publish.',
-      extra: '',
-    };
-  return `<div class="sc-guide">
-  <div class="sc-guide-title">How Second Chair works</div>
-  <ol class="sc-steps">${steps}</ol>
-  <div class="sc-tabbar sc-guide-tabs">${tab('reply')}${tab('review')}</div>
-  <div class="sc-guide-mode">
-    <p>${m.when} Start it in Claude Code: <code>${esc(m.cmd)}</code></p>
-    <p><b>Round 1:</b> ${m.r1}</p>
-    <dl class="sc-keys-list">${buttons(1)}</dl>
-    <p><b>Round 2:</b> ${m.r2}</p>
-    <dl class="sc-keys-list">${buttons(2)}</dl>
-    <p>Choosing <b>Revise</b> in round 2 sends nothing to GitHub: the agent writes a new version, and round 2 comes back.</p>
-    ${m.extra}
-    <p><b>Editing.</b> The box shows the text as GitHub will show it. ✎ Edit changes it, and your text wins. The note is only for the agent and is never posted.</p>
-    <p><b>Waiting.</b> After you send, the panel says what the agent does. The next round opens here by itself.</p>
-  </div>
-  <button type="button" class="sc-primary" data-sc-act="guidedone">Got it</button>
-</div>`;
+/** The steps of the tour for a mode and round, or none. */
+function tourSteps(mode, round) {
+  return SC_TOURS[`${mode}:${round}`] ?? [];
+}
+
+/** The storage key that remembers a tour was seen. */
+function tourKey(mode, round) {
+  return `sc:tour:${mode}:${round}`;
+}
+
+/** The bubble of one tour step: the text, where you are, and how to move on. */
+function buildTourTip(step, index, count) {
+  const last = index === count - 1;
+  return `<div class="sc-tour-text">${richText(step.text)}</div>
+<div class="sc-tour-foot"><span class="sc-muted">${index + 1} of ${count}</span><span class="sc-grow"></span>
+  <button type="button" class="sc-link" data-sc-act="tourskip">Skip</button>
+  ${index ? '<button type="button" class="sc-btn" data-sc-act="tourback">Back</button>' : ''}
+  <button type="button" class="sc-btn sc-on" data-sc-act="tournext">${last ? 'Done' : 'Next'}</button></div>`;
 }
 
 /** The panel for a pull request without proposals: how to start, and what to do when the server is down. */
@@ -635,7 +636,7 @@ function emptyPanel(loc, serverUp) {
   <p><b>No proposals for this pull request yet.</b></p>
   <p>In Claude Code, run:</p>
   <p><code>/second-chair:respond ${n}</code> for your own pull request,<br><code>/second-chair:review ${n}</code> for someone else's.</p>
-  <p>The cards then show up here and under the threads. <button type="button" class="sc-link" data-sc-act="guide">How it works</button></p>
+  <p>The cards then show up here and under the threads, and a short tour shows you around.</p>
   ${down}
 </div>`;
 }
@@ -682,16 +683,19 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-banner{margin:10px 14px 0;padding:8px 12px;border-radius:6px;background:var(--bgColor-success-muted,#dafbe1);border:1px solid var(--borderColor-success-muted,#4ac26b66)}
 .sc-banner-done{background:var(--bgColor-done-muted,#fbefff);border-color:var(--borderColor-done-muted,#c297ff66)}
 .sc-posted{margin:6px 0;padding-left:20px}
-.sc-guide,.sc-empty-panel{margin:10px 14px;padding:12px 14px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff);line-height:1.6}
-.sc-guide p,.sc-empty-panel p{margin:8px 0}.sc-guide-title{font-size:15px;font-weight:600;margin-bottom:6px}
-.sc-steps{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:6px}.sc-steps li{display:flex;gap:8px;align-items:flex-start}
-.sc-step-n{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:600 12px system-ui;color:var(--fgColor-onEmphasis,#fff);background:var(--fgColor-accent,#0969da)}
-.sc-guide-tabs{padding:0;margin:4px 0 8px}
-.sc-keys-list{display:grid;grid-template-columns:max-content 1fr;gap:2px 10px;margin:4px 0 8px}.sc-keys-list dt{font-weight:600}.sc-keys-list dd{margin:0}
-.sc-who{border-collapse:collapse;font-size:12px;margin:6px 0}.sc-who th,.sc-who td{border:1px solid var(--borderColor-default,#d0d7de);padding:3px 6px;text-align:left;vertical-align:top}
+.sc-empty-panel{margin:10px 14px;padding:12px 14px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff);line-height:1.6}
+.sc-empty-panel p{margin:8px 0}
 .sc-warn{color:var(--fgColor-attention,#9a6700)}
-.sc-guide .sc-primary{margin-top:6px}
-.sc-guide code,.sc-empty-panel code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
+.sc-empty-panel code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
+.sc-tour{position:fixed;inset:0;z-index:10000}
+.sc-tour-hole{position:fixed;border-radius:8px;box-shadow:0 0 0 3px var(--fgColor-accent,#0969da),0 0 0 9999px rgba(0,0,0,.55);pointer-events:none;transition:all .2s ease}
+.sc-tour-tip{position:fixed;width:300px;box-sizing:border-box;padding:12px 14px;border-radius:8px;background:var(--overlay-bgColor,var(--bgColor-default,#fff));color:var(--fgColor-default,#1f2328);border:1px solid var(--borderColor-default,#d0d7de);box-shadow:var(--shadow-floating-large,0 8px 24px rgba(0,0,0,.3));font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;transition:top .2s ease,left .2s ease}
+.sc-tour-tip::before{content:"";position:absolute;width:12px;height:12px;background:inherit;border:inherit;border-width:0;transform:rotate(45deg)}
+.sc-tour-tip.sc-tip-below::before{top:-7px;left:var(--sc-arrow,24px);border-top-width:1px;border-left-width:1px}
+.sc-tour-tip.sc-tip-above::before{bottom:-7px;left:var(--sc-arrow,24px);border-bottom-width:1px;border-right-width:1px}
+.sc-tour-tip.sc-tip-left::before{right:-7px;top:var(--sc-arrow,20px);border-top-width:1px;border-right-width:1px}
+.sc-tour-text{margin-bottom:10px}.sc-tour-foot{display:flex;align-items:center;gap:8px;font-size:12px}
+.sc-tour-foot .sc-btn{margin-left:0;border-radius:6px}
 .sc-yourreview-body{padding:10px 14px;border-bottom:1px solid var(--borderColor-default,#d0d7de)}
 .sc-submit{margin-top:4px}.sc-submit .sc-seg{flex-wrap:wrap}
 .sc-lock{margin-top:6px;font-size:12px;color:var(--fgColor-attention,#9a6700)}
@@ -701,7 +705,7 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 @keyframes sc-spin{to{transform:rotate(360deg)}}
 .sc-msg{margin:10px 14px 0;font-size:12px}.sc-msg.sc-err{color:var(--fgColor-danger,#d1242f)}
 .sc-paste{margin:10px 14px;width:calc(100% - 28px);min-height:90px;font:12px ui-monospace,monospace}
-.sc-card,.sc-panel,.sc-toggle{--sc-accent:var(--fgColor-accent,#0969da);--sc-border:var(--borderColor-default,#d0d7de);--sc-subtle:var(--bgColor-muted,#f6f8fa);--sc-canvas:var(--bgColor-default,#fff);--sc-muted:var(--fgColor-muted,#59636e);--sc-success:var(--fgColor-success,#1a7f37)}
+.sc-card,.sc-panel,.sc-toggle,.sc-tour{--sc-accent:var(--fgColor-accent,#0969da);--sc-border:var(--borderColor-default,#d0d7de);--sc-subtle:var(--bgColor-muted,#f6f8fa);--sc-canvas:var(--bgColor-default,#fff);--sc-muted:var(--fgColor-muted,#59636e);--sc-success:var(--fgColor-success,#1a7f37)}
 .sc-card{
   border:1px solid var(--sc-border);border-left:3px solid var(--sc-accent);border-radius:6px;background:var(--sc-canvas);color:var(--fgColor-default,#1f2328);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;overflow:hidden}
 .sc-card[data-sc-where=inline]{margin:8px 16px 16px}
@@ -788,11 +792,11 @@ function secondChairBootstrap() {
   })();
   const saveUi = () => GM_setValue('sc:ui', JSON.stringify(ui));
   // Whether the panel shows on this pull request. It follows the saved preference only when there is something to
-  // show: a pull request without proposals keeps it closed. The guide opens it on first use.
+  // show: a pull request without proposals keeps it closed.
   let panelShown = false;
-  let guideOpen = false;
-  let guideMode = null;
-  const guideSeen = () => Number(GM_getValue('sc:guide', 0)) >= SC_GUIDE_VERSION;
+  // The live tour: its steps, the one shown, and the overlay. A tour starts once per screen it explains.
+  let tour = null;
+  const toursTried = new Set();
 
   const load = () => {
     const raw = GM_getValue(storageKey(loc.repo, loc.number), null);
@@ -918,7 +922,7 @@ function secondChairBootstrap() {
   <div class="sc-hrow">${SC_LOGO}<b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${SC_MODE_NAME[modeOf(state.payload)]} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
     ${info ? '<span class="sc-label sc-done-label">✓ Done</span>' : ''}
     <span class="sc-dot ${serverUp ? 'sc-up' : serverUp === false ? 'sc-down' : ''}" title="server ${serverUp ? 'on' : 'off'} · ${SC_SERVER}"></span>
-    <button type="button" class="sc-icon" data-sc-act="guide" aria-label="How it works" title="How it works">?</button><button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
+    ${state ? '<button type="button" class="sc-icon" data-sc-act="tour" aria-label="Show the tour" title="Show the tour">?</button>' : ''}<button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
   ${ph === 'decide' ? `<div class="sc-progress"><i style="width:${pct(pr.done - pr.auto)}%" class="sc-p-mine"></i><i style="width:${pct(pr.auto)}%" class="sc-p-auto"></i></div>
   <div class="sc-hrow sc-muted sc-small"><span><b class="sc-fg sc-n-done">${pr.done}</b> of ${pr.total} decided</span>${pr.auto ? `<span>· ${pr.auto} auto</span>` : ''}<span class="sc-grow"></span><span class="sc-left">${pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send'}</span></div>` : ''}
   ${status}
@@ -933,9 +937,8 @@ function secondChairBootstrap() {
     const lock = ph === 'decide' ? submitLock(state) : null;
     const msg = message ? `<div class="sc-msg${message.error ? ' sc-err' : ''}">${richText(message.text)}</div>` : '';
     // Without proposals the panel explains how to start; it carries its own paste box when the server is down.
-    const empty = state || guideOpen ? '' : emptyPanel(loc, serverUp);
+    const empty = state ? '' : emptyPanel(loc, serverUp);
     const paste = message?.showPaste && !(empty && serverUp === false) ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
-    const guide = guideOpen ? buildGuide(guideMode ?? 'reply', loc.number) : '';
     const keys = state ? `<div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${decisionsFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div>` : '';
     let foot = '';
     if (ph === 'decide') {
@@ -948,8 +951,7 @@ function secondChairBootstrap() {
     } else if (ph === 'done') {
       foot = '<div class="sc-panel-foot sc-muted sc-small">Read only. A new proposal from the agent reopens this pull request.</div>';
     }
-    // The guide scrolls with the list, so its Got it button is always reachable.
-    panel.innerHTML = `${head}${menu}${banner}${state && !guideOpen ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${guide}${empty}${state && !guideOpen ? buildYourReview(state, body ? viewOf(body) : {}) + buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
+    panel.innerHTML = `${head}${menu}${banner}${state ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${empty}${state ? buildYourReview(state, body ? viewOf(body) : {}) + buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
     panel.querySelector('.sc-list').scrollTop = scrollTop;
     applyLayout();
   }
@@ -1040,6 +1042,8 @@ function secondChairBootstrap() {
       if (rebuild) rebuildInline();
       else renderInline();
       schedulePoll();
+      maybeTour();
+      placeTour();
     } finally {
       setTimeout(() => { rendering = false; }, 0);
     }
@@ -1078,7 +1082,6 @@ function secondChairBootstrap() {
       live = { pickedUpAt: null, revision: null, published: newRound ? null : live.published };
       // The first proposals on this page: the panel follows the saved preference now that it has something to show.
       if (!before) panelShown = panelShown || ui.open;
-      if (!before && guideOpen) guideMode = modeOf(res.payload);
     }
     renderAll(true);
   }
@@ -1279,9 +1282,140 @@ function secondChairBootstrap() {
   /** The element of a Second Chair control, or null for anything the page or a payload's markdown put there. */
   function ownControl(target, selector) {
     const el = target?.closest?.(selector);
-    if (!el || !el.closest('.sc-card, .sc-panel, .sc-toggle') || el.closest('.sc-md')) return null;
+    if (!el || !el.closest('.sc-card, .sc-panel, .sc-toggle, .sc-tour') || el.closest('.sc-md')) return null;
     return el;
   }
+
+  /** The card a tour explains: the first full card on the page, else one opened in the panel. */
+  function tourCard() {
+    const inline = document.querySelector('.sc-card[data-sc-where=inline]:not(.sc-compact)');
+    if (inline) return inline;
+    const inPanel = shellPanel()?.querySelector('.sc-row .sc-card');
+    if (inPanel) return inPanel;
+    // On Files changed GitHub may fold every comment: open the first one's card in the panel.
+    const first = displayOrder(state.payload.items).find((it) => it.comment_id);
+    if (!first) return null;
+    openId = first.thread_id;
+    panelOpen.add(first.thread_id);
+    renderPanel();
+    return shellPanel()?.querySelector('.sc-row .sc-card');
+  }
+
+  /** The element a step lights, or null when this page has none. */
+  function tourTarget(step) {
+    const base = step.at === 'card' ? tourCard() : shellPanel();
+    const el = base && step.sel ? base.querySelector(step.sel) : base;
+    return el && el.getClientRects().length ? el : null;
+  }
+
+  /** Lights the target and puts the bubble next to it: left of the panel, else below, else above. */
+  function placeTour() {
+    if (!tour) return;
+    const el = tourTarget(tour.steps[tour.index]);
+    const layer = document.body.querySelector(':scope > .sc-tour');
+    if (!el || !layer) return;
+    const r = el.getBoundingClientRect();
+    const pad = 6;
+    Object.assign(layer.querySelector('.sc-tour-hole').style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+    const tip = layer.querySelector('.sc-tour-tip');
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+    let side;
+    let left;
+    let top;
+    if (r.left > w + 30 && el.closest('.sc-panel')) {
+      side = 'left';
+      left = r.left - pad - 14 - w;
+      top = clamp(r.top + Math.min(r.height, 120) / 2 - 24, 8, innerHeight - h - 8);
+      tip.style.setProperty('--sc-arrow', `${clamp(r.top + Math.min(r.height, 120) / 2 - top - 6, 12, h - 24)}px`);
+    } else {
+      side = innerHeight - r.bottom > h + 24 || r.top < h + 24 ? 'below' : 'above';
+      left = clamp(r.left, 8, innerWidth - w - 8);
+      top = side === 'below' ? r.bottom + pad + 12 : r.top - pad - 12 - h;
+      tip.style.setProperty('--sc-arrow', `${clamp(r.left + 24 - left, 12, w - 24)}px`);
+    }
+    tip.className = `sc-tour-tip sc-tip-${side}`;
+    Object.assign(tip.style, { left: `${left}px`, top: `${clamp(top, 8, innerHeight - h - 8)}px` });
+  }
+
+  function showTourStep(index) {
+    if (!tour) return;
+    if (index >= tour.steps.length) {
+      endTour();
+      return;
+    }
+    tour.index = index;
+    const step = tour.steps[index];
+    if (step.at === 'panel' && !panelShown) {
+      panelShown = true;
+      renderPanel();
+    }
+    const el = tourTarget(step);
+    if (el) el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    let layer = document.body.querySelector(':scope > .sc-tour');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 'sc-tour';
+      layer.setAttribute('role', 'dialog');
+      layer.setAttribute('aria-label', 'Second Chair tour');
+      layer.innerHTML = '<div class="sc-tour-hole"></div><div class="sc-tour-tip" aria-live="polite"></div>';
+      document.body.appendChild(layer);
+    }
+    layer.querySelector('.sc-tour-tip').innerHTML = buildTourTip(step, index, tour.steps.length);
+    placeTour();
+    layer.querySelector('[data-sc-act=tournext]')?.focus({ preventScroll: true });
+  }
+
+  /**
+   * Starts the tour of the screen in front of the user: the mode and round on the page. Steps whose part of
+   * Second Chair is not on this page are left out.
+   */
+  function startTour() {
+    if (!state) return;
+    const p = state.payload;
+    const defs = tourSteps(modeOf(p), p.round);
+    if (defs.some((d) => d.at === 'panel') && !panelShown) {
+      panelShown = true;
+      renderPanel();
+    }
+    const steps = defs.filter((d) => tourTarget(d));
+    if (!steps.length) return;
+    tour = { key: tourKey(modeOf(p), p.round), steps, index: 0 };
+    showTourStep(0);
+  }
+
+  /** Ends the tour; `seen` remembers it, so it does not start by itself again. */
+  function endTour(seen = true) {
+    if (tour && seen) GM_setValue(tour.key, 1);
+    tour = null;
+    document.body.querySelectorAll(':scope > .sc-tour').forEach((n) => n.remove());
+  }
+
+  /** The first time a screen shows its cards, its tour starts by itself, once. */
+  function maybeTour() {
+    if (tour || !state || phase() !== 'decide') return;
+    const key = tourKey(modeOf(state.payload), state.payload.round);
+    if (GM_getValue(key, null) || toursTried.has(key)) return;
+    toursTried.add(key);
+    // Let GitHub and the cards settle first.
+    setTimeout(() => { if (!tour && state && tourKey(modeOf(state.payload), state.payload.round) === key) startTour(); }, 600);
+  }
+
+  addEventListener('resize', () => placeTour());
+  addEventListener('scroll', () => placeTour(), true);
+
+  // Keys belong to the tour while it shows: arrows and Enter move, Esc ends it.
+  document.addEventListener('keydown', (e) => {
+    if (!tour) return;
+    if (e.key === 'Escape') endTour();
+    else if (e.key === 'ArrowRight' || e.key === 'Enter') showTourStep(tour.index + 1);
+    else if (e.key === 'ArrowLeft') showTourStep(Math.max(0, tour.index - 1));
+    else return;
+    e.preventDefault();
+    // The other key listeners sit on document too, so only this stops them.
+    e.stopImmediatePropagation();
+  }, true);
 
   /** Puts the cursor in the reply editor of a thread, in the card the user works in. */
   function focusEditor(id, where) {
@@ -1317,26 +1451,16 @@ function secondChairBootstrap() {
         ui.open = panelShown;
         saveUi();
       }
-      // Closing the panel over the guide dismisses it, like Got it.
-      if (!panelShown && guideOpen) {
-        GM_setValue('sc:guide', SC_GUIDE_VERSION);
-        guideOpen = false;
-      }
       renderPanel();
       if (panelShown) sync(false);
-    } else if (act === 'guide') {
-      guideOpen = true;
-      guideMode = state ? modeOf(state.payload) : 'reply';
-      panelShown = true;
-      renderPanel();
-    } else if (act === 'guidetab') {
-      guideMode = el.dataset.scVal === 'review' ? 'review' : 'reply';
-      renderPanel();
-    } else if (act === 'guidedone') {
-      GM_setValue('sc:guide', SC_GUIDE_VERSION);
-      guideOpen = false;
-      if (!state) panelShown = false;
-      renderPanel();
+    } else if (act === 'tour') {
+      startTour();
+    } else if (act === 'tournext') {
+      showTourStep(tour ? tour.index + 1 : 0);
+    } else if (act === 'tourback') {
+      showTourStep(tour ? Math.max(0, tour.index - 1) : 0);
+    } else if (act === 'tourskip') {
+      endTour();
     } else if (act === 'menu') {
       menuOpen = !menuOpen;
       renderPanel();
@@ -1459,7 +1583,7 @@ function secondChairBootstrap() {
   }, true);
 
   document.addEventListener('keydown', (e) => {
-    if (!state || !panelShown || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (tour || !state || !panelShown || e.altKey || e.ctrlKey || e.metaKey) return;
     const t = e.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
     // Arrows scroll the page as usual until a thread is selected in the panel; j/k always move.
@@ -1542,9 +1666,8 @@ function secondChairBootstrap() {
       expanded.clear();
       panelOpen.clear();
       editing.clear();
-      guideOpen = !guideSeen();
-      guideMode = state ? modeOf(state.payload) : 'reply';
-      panelShown = guideOpen || (ui.open && Boolean(state));
+      endTour(false);
+      panelShown = ui.open && Boolean(state);
       renderAll(true);
       sync(false);
       return;

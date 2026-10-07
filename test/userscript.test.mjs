@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'buildGuide', 'emptyPanel', 'SC_GUIDE_VERSION'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, buildGuide, emptyPanel, SC_GUIDE_VERSION } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -606,28 +606,44 @@ test('a review comment folded on GitHub says to decide it here', () => {
   assert.match(buildPanelList(stateFor(payload(), null), null, 'all', () => ({ hidden: true })), /not loaded on page/);
 });
 
-test('the guide explains who does what, the rounds and every button of the mode', () => {
-  const g = buildGuide('review', 42);
-  assert.match(g, /The agent proposes/); assert.match(g, /You decide/); assert.match(g, /The agent posts what you approved/);
-  assert.match(g, /Nothing reaches GitHub without your decision/);
-  assert.match(g, /\/second-chair:review 42/);
-  for (const b of [...SC_DECISIONS.review[1], ...SC_DECISIONS.review[2]]) assert.ok(g.includes(esc(b.help)), b.help);
-  assert.match(g, /GitHub&#39;s own Submit button makes the review public/);
-  assert.match(g, /data-sc-act="guidetab" data-sc-val="review"[^>]*aria-selected="true"/);
-  const r = buildGuide('reply', 7);
-  assert.match(r, /\/second-chair:respond 7/);
-  for (const b of [...SC_DECISIONS.reply[1], ...SC_DECISIONS.reply[2]]) assert.ok(r.includes(esc(b.help)), b.help);
-  assert.match(r, /The note is only for the agent/);
-  assert.match(r, /data-sc-act="guidedone"[^>]*>Got it/);
-  assert.equal(/<a [^>]*href="#"/.test(r + g), false);
-  assert.equal(SC_GUIDE_VERSION, 1);
+test('each screen has a short tour that points at Second Chair, never at GitHub', () => {
+  const counts = { 'reply:1': 7, 'reply:2': 3, 'review:1': 6, 'review:2': 3 };
+  for (const [key, n] of Object.entries(counts)) {
+    const [mode, round] = key.split(':');
+    const steps = tourSteps(mode, Number(round));
+    assert.equal(steps.length, n, key);
+    for (const st of steps) {
+      assert.ok(st.at === 'card' || st.at === 'panel', `${key}: ${st.text}`);
+      assert.ok(st.text.length <= 150, `${key}: short text: ${st.text}`);
+      assert.ok(st.text.split(/[.!?](\s|$)/).filter((x) => x && x.trim()).length <= 2, `${key}: two sentences at most: ${st.text}`);
+      assert.doesNotMatch(st.sel ?? '', /js-|discussion_r|gh-/);
+    }
+  }
+  assert.match(tourSteps('reply', 1)[0].text, /Nothing is posted yet/);
+  assert.equal(tourSteps('reply', 1).at(-1).sel, '[data-sc-act=export]');
+  assert.ok(tourSteps('review', 1).some((st) => /Submit/.test(st.text)), 'review warns about GitHub\'s Submit');
+  assert.ok(tourSteps('review', 2).some((st) => st.sel === '.sc-submit'));
+  assert.deepEqual(tourSteps('other', 1), []);
+  assert.equal(tourKey('review', 2), 'sc:tour:review:2');
+});
+
+test('the tour bubble says where you are and how to move on', () => {
+  const h = buildTourTip({ text: 'The agent\'s proposal.' }, 0, 7);
+  assert.match(h, /The agent&#39;s proposal\./);
+  assert.match(h, /1 of 7/);
+  assert.match(h, /data-sc-act="tourskip"/);
+  assert.match(h, /data-sc-act="tournext"[^>]*>Next/);
+  assert.doesNotMatch(h, /data-sc-act="tourback"/, 'no Back on the first step');
+  const last = buildTourTip({ text: 'Send.' }, 6, 7);
+  assert.match(last, /data-sc-act="tourback"/);
+  assert.match(last, /data-sc-act="tournext"[^>]*>Done/);
+  assert.equal(/<a [^>]*href="#"/.test(h + last), false);
 });
 
 test('the empty panel says how to start', () => {
   const h = emptyPanel({ repo: 'acme/w', number: 7 }, true);
   assert.match(h, /No proposals for this pull request yet/);
   assert.match(h, /\/second-chair:respond 7/); assert.match(h, /\/second-chair:review 7/);
-  assert.match(h, /data-sc-act="guide"/);
   assert.doesNotMatch(h, /sc-paste/);
   const down = emptyPanel({ repo: 'acme/w', number: 7 }, false);
   assert.match(down, /second-chair start/);

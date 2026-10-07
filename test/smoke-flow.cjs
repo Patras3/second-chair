@@ -26,8 +26,9 @@ const proposals = (pr, round, over = {}) => ({
 let failures = 0;
 const check = (cond, msg) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); if (!cond) failures++; };
 const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc-card=${id}]`;
-// The guide shows once per browser; these pages start as a browser that has seen it.
-const SEEN = { 'sc:guide': '1', 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) };
+// The tours show once per screen; these pages start as a browser that has seen them.
+const TOURS_SEEN = { 'sc:tour:reply:1': '1', 'sc:tour:reply:2': '1', 'sc:tour:review:1': '1', 'sc:tour:review:2': '1' };
+const SEEN = { ...TOURS_SEEN, 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) };
 
 async function openPage(browser, port, pr, store = SEEN, html = PAGE) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
@@ -60,39 +61,59 @@ async function decideAndSend(page, key) {
   };
   const browser = await chromium.launch();
 
-  // 0. First use: the guide opens by itself, once; a pull request without proposals keeps the panel closed.
-  const first = await openPage(browser, port, 5, { 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) });
-  await first.waitForSelector('body > .sc-panel .sc-guide');
-  check(await first.evaluate(() => !document.querySelector('body > .sc-panel').hidden), 'on first use the panel opens with the guide');
-  check(/The agent proposes/.test(await text(first, '.sc-guide')) && /\/second-chair:respond 5/.test(await text(first, '.sc-guide')), 'the guide says who does what and how to start');
-  await first.click('.sc-guide [data-sc-act=guidetab][data-sc-val=review]');
-  check(/\/second-chair:review 5/.test(await text(first, '.sc-guide')), 'the Review tab explains review mode');
-  await first.click('[data-sc-act=guidedone]');
-  check(await first.evaluate(() => document.querySelector('body > .sc-panel').hidden), 'Got it closes the guide, and the empty panel with it');
-  const seen = await first.evaluate(() => JSON.stringify(window.__store));
-  check(JSON.parse(seen)['sc:guide'] !== undefined, 'the browser remembers that the guide was seen');
-  await first.close();
-  const again = await openPage(browser, port, 5, JSON.parse(seen));
-  await again.waitForTimeout(800);
-  check(await again.evaluate(() => document.querySelector('body > .sc-panel').hidden), 'a pull request without proposals keeps the panel closed, though it was left open');
-  check((await text(again, '.sc-toggle')).includes('–'), 'the pill shows a dash');
-  await again.click('.sc-toggle');
-  await again.waitForSelector('.sc-empty-panel');
-  check(/\/second-chair:review 5/.test(await text(again, '.sc-empty-panel')) && await again.locator('.sc-paste').count() === 0, 'the empty panel says how to start, without a paste box');
-  await again.click('[data-sc-act=guide]');
-  check(await again.locator('.sc-guide').count() === 1, 'the ? and How it works open the guide again');
-  await again.click('[data-sc-act=guidedone]');
-  check(await again.evaluate(() => JSON.parse(window.__store['sc:ui']).open === true), 'closing an empty panel does not change the saved preference');
-  await again.close();
-  const closer = await openPage(browser, port, 5, { 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: false }) });
-  await closer.waitForSelector('.sc-guide');
-  await closer.click('[data-sc-act=panel][aria-label=Close]');
-  const closedStore = await closer.evaluate(() => window.__store);
-  await closer.close();
-  const after = await openPage(browser, port, 5, closedStore);
-  await after.waitForTimeout(800);
-  check(await after.locator('.sc-guide').count() === 0, 'closing the guide with ✕ also counts as seen');
-  await after.close();
+  // 0. The first cards of a screen start a live tour: the page dims, one part of Second Chair at a time is lit.
+  await api('PUT', '/api/proposals', proposals(4, 1, { items: proposals(4, 1).items.map((it) => ({ ...it, context: 'Checked it.' })) }));
+  const tour = await openPage(browser, port, 4, {});
+  await tour.waitForSelector('.sc-tour .sc-tour-tip');
+  const tip = () => text(tour, '.sc-tour-tip');
+  // The light moves with a short animation; measure once it has settled.
+  const litInside = async (sel) => (await tour.waitForTimeout(350)) ?? tour.evaluate((q) => {
+    const hole = document.querySelector('.sc-tour-hole').getBoundingClientRect();
+    const el = document.querySelector(q).getBoundingClientRect();
+    return hole.left <= el.left + 1 && hole.top <= el.top + 1 && hole.right >= el.right - 1 && hole.bottom >= el.bottom - 1;
+  }, sel);
+  check(/1 of 7/.test(await tip()) && /Nothing is posted yet/.test(await tip()), 'the tour starts on the first card');
+  check(await litInside(card('T1')), 'and lights that card');
+  check(await tour.evaluate(() => { const b = document.querySelector('.sc-tour [data-sc-act=tournext]'); const cs = getComputedStyle(b); return cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== cs.color; }), 'the Next button is filled and readable');
+  await tour.click('[data-sc-act=tournext]');
+  check(/2 of 7/.test(await tip()) && await litInside(`${card('T1')} .sc-foryou`), 'Next moves to the For you note');
+  await tour.keyboard.press('ArrowRight');
+  check(/3 of 7/.test(await tip()), 'the right arrow moves on');
+  await tour.keyboard.press('ArrowLeft');
+  await tour.click('[data-sc-act=tourback]');
+  check(/1 of 7/.test(await tip()), 'the left arrow and Back move back');
+  check(await tour.evaluate(() => document.elementFromPoint(innerWidth / 2, innerHeight - 5)?.closest('.sc-tour') !== null), 'the dimmed page takes no clicks');
+  for (let i = 0; i < 5; i++) await tour.click('[data-sc-act=tournext]');
+  check(/6 of 7/.test(await tip()) && await tour.evaluate(() => !document.querySelector('body > .sc-panel').hidden) && await litInside('.sc-status'), 'a panel step opens the panel and lights the status line');
+  await tour.keyboard.press('Escape');
+  check(await tour.locator('.sc-tour').count() === 0, 'Esc ends the tour');
+  const toured = await tour.evaluate(() => JSON.stringify(window.__store));
+  check(JSON.parse(toured)['sc:tour:reply:1'] !== undefined, 'and the browser remembers it');
+  await tour.close();
+  const tour2 = await openPage(browser, port, 4, JSON.parse(toured));
+  await tour2.waitForSelector(card('T1'));
+  await tour2.waitForTimeout(1200);
+  check(await tour2.locator('.sc-tour').count() === 0, 'a seen tour does not come back by itself');
+  await tour2.click('.sc-toggle');
+  await tour2.click('[data-sc-act=tour]');
+  await tour2.waitForSelector('.sc-tour .sc-tour-tip');
+  for (let i = 0; i < 6; i++) await tour2.click('[data-sc-act=tournext]');
+  check(/7 of 7/.test(await text(tour2, '.sc-tour-tip')) && await tour2.locator('[data-sc-act=tournext]', { hasText: 'Done' }).count() === 1, '? starts it again, and the last step says Done');
+  await tour2.click('[data-sc-act=tournext]');
+  check(await tour2.locator('.sc-tour').count() === 0, 'Done ends it');
+  await tour2.close();
+
+  // 0b. A pull request without proposals has no tour and keeps the panel closed.
+  const empty = await openPage(browser, port, 5, { 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) });
+  await empty.waitForTimeout(800);
+  check(await empty.locator('.sc-tour').count() === 0 && await empty.evaluate(() => document.querySelector('body > .sc-panel').hidden), 'no proposals: no tour, and the panel stays closed');
+  check((await text(empty, '.sc-toggle')).includes('–'), 'the pill shows a dash');
+  await empty.click('.sc-toggle');
+  await empty.waitForSelector('.sc-empty-panel');
+  check(/\/second-chair:review 5/.test(await text(empty, '.sc-empty-panel')) && await empty.locator('.sc-paste').count() === 0, 'the empty panel says how to start, without a paste box');
+  await empty.click('.sc-toggle');
+  check(await empty.evaluate(() => JSON.parse(window.__store['sc:ui']).open === true), 'closing an empty panel does not change the saved preference');
+  await empty.close();
 
   // 1. After the send of round 1: the agent's turn, a waiting footer, no Send button.
   await api('PUT', '/api/proposals', proposals(7, 1));
@@ -202,7 +223,8 @@ async function decideAndSend(page, key) {
   check((await api('GET', '/api/decisions?repo=acme/w&pr=11&round=2&peek=1')).body.submit === 'COMMENT', 'the decisions carry the submit');
   check(/Then it submits it as Comment/.test(await text(rv, '.sc-status')), 'the status says the agent will submit it');
   const fresh = await openPage(browser, port, 11, {});
-  check(await within(fresh, () => document.querySelector('.sc-guide [data-sc-val=review][aria-selected=true]') !== null), 'on first use in a review, the guide opens on the Review tab');
+  await fresh.waitForSelector('.sc-tour .sc-tour-tip');
+  check(/1 of 3/.test(await text(fresh, '.sc-tour-tip')) && /leave it as a draft, or let the agent submit it/.test(await text(fresh, '.sc-tour-tip')), 'review round 2 has its own tour, on the submit choice');
   await fresh.close();
 
   // 11. Every control works inside page code that eats clicks, and editing is plain to see.

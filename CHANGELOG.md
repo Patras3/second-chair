@@ -1,8 +1,12 @@
 # Changelog
 
-## 1.1.1
+## 1.1.2
 
 Not released yet: no tag and no GitHub Release.
+
+- A live tour replaces the text guide. The first time you see the cards of a mode and round, the page dims and one part of Second Chair at a time lights up, with a short note and **Next**, **Back** and **Skip**. Each tour has three to seven steps. The **?** in the side panel starts it again.
+
+## 1.1.1
 
 - The filter bar in the side panel no longer shows a scroll bar of its own.
 
@@ -10,7 +14,6 @@ Not released yet: no tag and no GitHub Release.
 
 Added:
 
-- A guide opens in the side panel the first time Second Chair runs. It says who does what, what the two rounds are, and what each button does, for both modes. The **?** in the panel opens it again.
 - A status line under the panel header says whose turn it is and what happens next.
 - After you send a round, the panel waits for the agent and shows when the agent picked your decisions up. The next round opens by itself, without a reload.
 - **Edit and send again** while the agent works on a round. `second-chair push` refuses the next round until the agent read the change, so the agent always sees it.

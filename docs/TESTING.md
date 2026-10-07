@@ -80,9 +80,9 @@ Use a pull request by another account.
 - [ ] After `publish`, the pending review on GitHub holds the two comments with the approved texts, and the dropped one is gone. The review is still pending.
 - [ ] With no pending review on the pull request, `second-chair draft <PR> --body-file body.md` with no comments file creates a pending review. `second-chair pending <PR>` shows it with that body and no comments.
 
-### 1.1: guide, turns, resend, review submit
+### 1.1: tour, turns, resend, review submit
 
-- [ ] In a browser profile that never ran Second Chair, open a pull request. The panel opens with the guide. **Got it** closes it, and a reload does not show it again. **?** opens it.
+- [ ] In a browser profile that never ran Second Chair, open a pull request with proposals. The tour starts: the page dims and the first card lights up. **Next**, **Back**, the arrow keys and Esc work, also on the Files changed tab. A reload does not start it again. **?** starts it.
 - [ ] A pull request with no proposals keeps the panel closed. The pill shows a dash. A click opens a panel that names the two commands.
 - [ ] Respond: after the round 1 send, the panel says it is the agent's turn and shows when the agent picked the decisions up. Round 2 opens by itself, without a reload.
 - [ ] Respond: after the pick-up, **Edit and send again**, change one decision, send. The agent's `push` of round 2 is refused until it ran `get`, and the agent tells you what changed.

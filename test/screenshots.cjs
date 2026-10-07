@@ -1,6 +1,6 @@
 // Renders the README screenshots: the userscript on a mock GitHub pull request page, with a real
 // second-chair server behind it. Run: PLAYWRIGHT=/path/to/node_modules/playwright npm run screenshots
-// Writes docs/images/{card-light,card-dark,panel,review-mode,waiting,done,guide,social-preview}.png.
+// Writes docs/images/{card-light,card-dark,panel,review-mode,waiting,done,tour,social-preview}.png.
 const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
 const fs = require('fs');
 const os = require('os');
@@ -230,8 +230,9 @@ async function openPage(browser, port, { url, html, store, viewport, scale = 1.5
   await context.clock.setFixedTime(new Date('2026-09-30T18:20:00Z'));
   const page = await context.newPage();
   await page.route(url, (r) => r.fulfill({ contentType: 'text/html', body: html }));
-  // A browser that has seen the guide, unless the shot is the guide itself.
-  await installGm(page, port, JSON.stringify({ 'sc:guide': '1', ...(store ?? {}) }));
+  // A browser that has seen the tours, unless the shot is a tour itself.
+  const seen = { 'sc:tour:reply:1': '1', 'sc:tour:reply:2': '1', 'sc:tour:review:1': '1', 'sc:tour:review:2': '1' };
+  await installGm(page, port, JSON.stringify({ ...seen, ...(store ?? {}) }));
   await page.goto(url);
   for (const v of vendor) await page.addScriptTag({ content: v });
   await page.addScriptTag({ content: script });
@@ -349,11 +350,14 @@ const hidePill = (page) => page.addStyleTag({ content: '.sc-toggle{visibility:hi
     await p.context().close();
   }
 
-  // 7. The guide, as it opens on first use.
+  // 7. The live tour, as it starts the first time the cards show.
   {
-    const p = await openPage(browser, port, { url: url57, html: html57, store: { 'sc:guide': '0' }, viewport: { width: 1000, height: 1100 }, scale: 1.4 });
-    await p.waitForSelector('.sc-guide [data-sc-val=review][aria-selected=true]');
-    await shoot(p.locator('.sc-panel'), 'guide.png');
+    const p = await openPage(browser, port, { url: url57, html: html57, store: { 'sc:tour:review:1': null, 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) }, viewport: { width: 1300, height: 820 }, scale: 1.2 });
+    await p.waitForSelector('.sc-tour .sc-tour-tip');
+    await p.click('[data-sc-act=tournext]');
+    await p.click('[data-sc-act=tournext]');
+    await p.waitForTimeout(500);
+    await shoot(p, 'tour.png');
     await p.context().close();
   }
 
