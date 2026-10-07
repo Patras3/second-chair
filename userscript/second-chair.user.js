@@ -560,6 +560,73 @@ function buildFilterBar(state, filterKey) {
   return `<div class="sc-tabbar">${tabs}<select class="sc-fdecision" data-sc-act="filterselect"><option value="">Decision</option>${options}</select></div>`;
 }
 
+// Bump when the guide says something new, so it shows once more to people who closed it.
+const SC_GUIDE_VERSION = 1;
+
+/** The guide: who does what, then the chosen mode's rounds and buttons. `number` fills in the commands. */
+function buildGuide(mode, number) {
+  const steps = [
+    ['The agent proposes', 'a reply or a comment for every thread, next to it on GitHub.'],
+    ['You decide', 'each one here: keep it, change the text, or tell the agent what to change.'],
+    ['The agent posts what you approved', 'with your exact text. Nothing reaches GitHub without your decision.'],
+  ].map(([t, d], i) => `<li><span class="sc-step-n">${i + 1}</span><span><b>${t}</b> ${d}</span></li>`).join('');
+  const tab = (key) => `<button type="button" class="sc-ftab${mode === key ? ' sc-ftab-on' : ''}" data-sc-act="guidetab" data-sc-val="${key}" aria-selected="${mode === key}">${SC_MODE_NAME[key]}</button>`;
+  const buttons = (round) => SC_DECISIONS[mode][round].map((b) => `<dt>${esc(b.label)}</dt><dd>${esc(b.help)}</dd>`).join('');
+  const m = mode === 'review'
+    ? {
+      when: 'Review someone else\'s pull request.',
+      cmd: `/second-chair:review ${number}`,
+      r1: 'decide each comment of your draft review. Only you see the draft on GitHub.',
+      r2: 'approve the final texts, and choose what happens to the review: leave it as a draft, or submit it.',
+      extra: `<table class="sc-who"><tr><th>When</th><th>Who</th><th>On GitHub</th></tr>
+<tr><td>Before round 1</td><td>the agent</td><td>Its comments go into your draft review. Only you see them, marked Pending.</td></tr>
+<tr><td>Rounds 1 and 2</td><td>you, here</td><td>Nothing changes.</td></tr>
+<tr><td>After round 2</td><td>the agent</td><td>It edits and removes draft comments to match your decisions.</td></tr>
+<tr><td>Submit</td><td>you choose</td><td>Leave as draft, and submit it yourself on GitHub. Or pick Comment, Approve or Request changes, and the agent submits it.</td></tr></table>
+<p class="sc-warn">${esc("GitHub's own Submit button makes the review public. Leave it until Second Chair says the review is ready, or choose the submit in round 2.")}</p>`,
+    }
+    : {
+      when: 'Answer the review threads on your own pull request.',
+      cmd: `/second-chair:respond ${number}`,
+      r1: 'decide what to do with each thread. The agent makes the fixes and commits them, without pushing.',
+      r2: 'approve the final replies. The agent pushes the commits and posts the replies you chose to publish.',
+      extra: '',
+    };
+  return `<div class="sc-guide">
+  <div class="sc-guide-title">How Second Chair works</div>
+  <ol class="sc-steps">${steps}</ol>
+  <div class="sc-tabbar sc-guide-tabs">${tab('reply')}${tab('review')}</div>
+  <div class="sc-guide-mode">
+    <p>${m.when} Start it in Claude Code: <code>${esc(m.cmd)}</code></p>
+    <p><b>Round 1:</b> ${m.r1}</p>
+    <dl class="sc-keys-list">${buttons(1)}</dl>
+    <p><b>Round 2:</b> ${m.r2}</p>
+    <dl class="sc-keys-list">${buttons(2)}</dl>
+    <p>Choosing <b>Revise</b> in round 2 sends nothing to GitHub: the agent writes a new version, and round 2 comes back.</p>
+    ${m.extra}
+    <p><b>Editing.</b> The box shows the text as GitHub will show it. ✎ Edit changes it, and your text wins. The note is only for the agent and is never posted.</p>
+    <p><b>Waiting.</b> After you send, the panel says what the agent does. The next round opens here by itself.</p>
+  </div>
+  <button type="button" class="sc-primary" data-sc-act="guidedone">Got it</button>
+</div>`;
+}
+
+/** The panel for a pull request without proposals: how to start, and what to do when the server is down. */
+function emptyPanel(loc, serverUp) {
+  const n = loc.number;
+  const down = serverUp === false
+    ? `<p class="sc-warn">The Second Chair server is not running. Start it in Claude Code with <code>! second-chair start</code>.</p>
+<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>`
+    : '';
+  return `<div class="sc-empty-panel">
+  <p><b>No proposals for this pull request yet.</b></p>
+  <p>In Claude Code, run:</p>
+  <p><code>/second-chair:respond ${n}</code> for your own pull request,<br><code>/second-chair:review ${n}</code> for someone else's.</p>
+  <p>The cards then show up here and under the threads. <button type="button" class="sc-link" data-sc-act="guide">How it works</button></p>
+  ${down}
+</div>`;
+}
+
 const SC_CSS = `
 .sc-toggle{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;align-items:center;gap:6px;height:32px;padding:0 12px 0 10px;border-radius:16px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);font:600 12px/1 -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:var(--shadow-floating-small,0 2px 8px rgba(0,0,0,.15))}
 .sc-toggle.sc-complete{color:var(--fgColor-success,#1a7f37);border-color:var(--fgColor-success,#1a7f37)}
@@ -601,6 +668,16 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-banner{margin:10px 14px 0;padding:8px 12px;border-radius:6px;background:var(--bgColor-success-muted,#dafbe1);border:1px solid var(--borderColor-success-muted,#4ac26b66)}
 .sc-banner-done{background:var(--bgColor-done-muted,#fbefff);border-color:var(--borderColor-done-muted,#c297ff66)}
 .sc-posted{margin:6px 0;padding-left:20px}
+.sc-guide,.sc-empty-panel{margin:10px 14px;padding:12px 14px;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-default,#fff);line-height:1.6}
+.sc-guide p,.sc-empty-panel p{margin:8px 0}.sc-guide-title{font-size:15px;font-weight:600;margin-bottom:6px}
+.sc-steps{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:6px}.sc-steps li{display:flex;gap:8px;align-items:flex-start}
+.sc-step-n{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:600 12px system-ui;color:var(--fgColor-onEmphasis,#fff);background:var(--fgColor-accent,#0969da)}
+.sc-guide-tabs{padding:0;margin:4px 0 8px}
+.sc-keys-list{display:grid;grid-template-columns:max-content 1fr;gap:2px 10px;margin:4px 0 8px}.sc-keys-list dt{font-weight:600}.sc-keys-list dd{margin:0}
+.sc-who{border-collapse:collapse;font-size:12px;margin:6px 0}.sc-who th,.sc-who td{border:1px solid var(--borderColor-default,#d0d7de);padding:3px 6px;text-align:left;vertical-align:top}
+.sc-warn{color:var(--fgColor-attention,#9a6700)}
+.sc-guide .sc-primary{margin-top:6px}
+.sc-guide code,.sc-empty-panel code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
 .sc-yourreview-body{padding:10px 14px;border-bottom:1px solid var(--borderColor-default,#d0d7de)}
 .sc-submit{margin-top:4px}.sc-submit .sc-seg{flex-wrap:wrap}
 .sc-lock{margin-top:6px;font-size:12px;color:var(--fgColor-attention,#9a6700)}
@@ -696,6 +773,12 @@ function secondChairBootstrap() {
     }
   })();
   const saveUi = () => GM_setValue('sc:ui', JSON.stringify(ui));
+  // Whether the panel shows on this pull request. It follows the saved preference only when there is something to
+  // show: a pull request without proposals keeps it closed. The guide opens it on first use.
+  let panelShown = false;
+  let guideOpen = false;
+  let guideMode = null;
+  const guideSeen = () => Number(GM_getValue('sc:guide', 0)) >= SC_GUIDE_VERSION;
 
   const load = () => {
     const raw = GM_getValue(storageKey(loc.repo, loc.number), null);
@@ -768,7 +851,7 @@ function secondChairBootstrap() {
       document.body.appendChild(toggle);
       const panel = document.createElement('div');
       panel.className = 'sc-panel';
-      panel.hidden = !ui.open;
+      panel.hidden = !panelShown;
       document.body.appendChild(panel);
     }
   }
@@ -782,11 +865,11 @@ function secondChairBootstrap() {
   function applyLayout() {
     const panel = shellPanel();
     if (!panel) return;
-    panel.hidden = !ui.open;
+    panel.hidden = !panelShown;
     panel.classList.toggle('sc-wide', ui.wide);
     // The page narrows next to the panel instead of hiding under it.
-    document.documentElement.classList.toggle('sc-shift-narrow', ui.open && !ui.wide);
-    document.documentElement.classList.toggle('sc-shift-wide', ui.open && ui.wide);
+    document.documentElement.classList.toggle('sc-shift-narrow', panelShown && !ui.wide);
+    document.documentElement.classList.toggle('sc-shift-wide', panelShown && ui.wide);
   }
 
   const sendLabel = (pr) => `${state.resendOf ? 'Send again' : 'Send decisions'}${pr.complete ? '' : ` · ${pr.total - pr.done} left`}`;
@@ -820,7 +903,7 @@ function secondChairBootstrap() {
   <div class="sc-hrow">${SC_LOGO}<b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${modeOf(state.payload)} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
     ${info ? '<span class="sc-label sc-done-label">✓ Done</span>' : ''}
     <span class="sc-dot ${serverUp ? 'sc-up' : serverUp === false ? 'sc-down' : ''}" title="server ${serverUp ? 'on' : 'off'} · ${SC_SERVER}"></span>
-    <button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
+    <button type="button" class="sc-icon" data-sc-act="guide" aria-label="How it works" title="How it works">?</button><button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
   ${ph === 'decide' ? `<div class="sc-progress"><i style="width:${pct(pr.done - pr.auto)}%" class="sc-p-mine"></i><i style="width:${pct(pr.auto)}%" class="sc-p-auto"></i></div>
   <div class="sc-hrow sc-muted sc-small"><span><b class="sc-fg sc-n-done">${pr.done}</b> of ${pr.total} decided</span>${pr.auto ? `<span>· ${pr.auto} auto</span>` : ''}<span class="sc-grow"></span><span class="sc-left">${pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send'}</span></div>` : ''}
   ${status}
@@ -834,7 +917,10 @@ function secondChairBootstrap() {
     const body = state ? itemById('BODY') : null;
     const lock = ph === 'decide' ? submitLock(state) : null;
     const msg = message ? `<div class="sc-msg${message.error ? ' sc-err' : ''}">${richText(message.text)}</div>` : '';
-    const paste = !state || message?.showPaste ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
+    // Without proposals the panel explains how to start; it carries its own paste box when the server is down.
+    const empty = state || guideOpen ? '' : emptyPanel(loc, serverUp);
+    const paste = message?.showPaste && !(empty && serverUp === false) ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
+    const guide = guideOpen ? buildGuide(guideMode ?? 'reply', loc.number) : '';
     const keys = state ? `<div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${decisionsFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div>` : '';
     let foot = '';
     if (ph === 'decide') {
@@ -847,7 +933,8 @@ function secondChairBootstrap() {
     } else if (ph === 'done') {
       foot = '<div class="sc-panel-foot sc-muted sc-small">Read only. A new proposal from the agent reopens this pull request.</div>';
     }
-    panel.innerHTML = `${head}${menu}${banner}${state ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${state ? buildYourReview(state, body ? viewOf(body) : {}) + buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
+    // The guide scrolls with the list, so its Got it button is always reachable.
+    panel.innerHTML = `${head}${menu}${banner}${state && !guideOpen ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${guide}${empty}${state && !guideOpen ? buildYourReview(state, body ? viewOf(body) : {}) + buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
     panel.querySelector('.sc-list').scrollTop = scrollTop;
     applyLayout();
   }
@@ -971,9 +1058,12 @@ function secondChairBootstrap() {
       else if (newRound && source === 'server' && before.phase !== 'decide') {
         // The agent's next round arrived while the user waited: say so, and show it.
         message = { text: res.payload.round === before.round ? `A new round ${res.payload.round} is here.` : `Round ${res.payload.round} is here.` };
-        ui.open = true;
+        panelShown = true;
       } else message = { text: `Loaded ${res.payload.items.length} ${modeOf(res.payload) === 'review' ? 'review comments' : 'threads'}, round ${res.payload.round}, from the ${source}.` };
       live = { pickedUpAt: null, revision: null, published: newRound ? null : live.published };
+      // The first proposals on this page: the panel follows the saved preference now that it has something to show.
+      if (!before) panelShown = panelShown || ui.open;
+      if (!before && guideOpen) guideMode = modeOf(res.payload);
     }
     renderAll(true);
   }
@@ -1188,11 +1278,29 @@ function secondChairBootstrap() {
       renderPanel();
     }
     if (act === 'panel') {
-      ui.open = !ui.open;
+      panelShown = !panelShown;
       menuOpen = false;
-      saveUi();
-      applyLayout();
-      if (ui.open) sync(false);
+      // An empty panel opened to look around does not change the preference for pull requests with proposals.
+      if (state) {
+        ui.open = panelShown;
+        saveUi();
+      }
+      if (!panelShown) guideOpen = false;
+      renderPanel();
+      if (panelShown) sync(false);
+    } else if (act === 'guide') {
+      guideOpen = true;
+      guideMode = state ? modeOf(state.payload) : 'reply';
+      panelShown = true;
+      renderPanel();
+    } else if (act === 'guidetab') {
+      guideMode = el.dataset.scVal === 'review' ? 'review' : 'reply';
+      renderPanel();
+    } else if (act === 'guidedone') {
+      GM_setValue('sc:guide', SC_GUIDE_VERSION);
+      guideOpen = false;
+      if (!state) panelShown = false;
+      renderPanel();
     } else if (act === 'menu') {
       menuOpen = !menuOpen;
       renderPanel();
@@ -1315,7 +1423,7 @@ function secondChairBootstrap() {
   }, true);
 
   document.addEventListener('keydown', (e) => {
-    if (!state || !ui.open || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!state || !panelShown || e.altKey || e.ctrlKey || e.metaKey) return;
     const t = e.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
     // Arrows scroll the page as usual until a thread is selected in the panel; j/k always move.
@@ -1398,6 +1506,9 @@ function secondChairBootstrap() {
       expanded.clear();
       panelOpen.clear();
       editing.clear();
+      guideOpen = !guideSeen();
+      guideMode = state ? modeOf(state.payload) : 'reply';
+      panelShown = guideOpen || (ui.open && Boolean(state));
       renderAll(true);
       sync(false);
       return;

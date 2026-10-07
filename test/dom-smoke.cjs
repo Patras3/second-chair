@@ -36,7 +36,8 @@ const PAGE = `<html><head></head><body>
 async function openPage(browser, port, store, pr = 7) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   await page.route(`https://github.com/acme/w/pull/${pr}`, (r) => r.fulfill({ contentType: 'text/html', body: PAGE }));
-  await installGm(page, port, store);
+  // These pages start as a browser that has already seen the guide; test/smoke-flow.cjs covers the guide.
+  await installGm(page, port, JSON.stringify({ 'sc:guide': '1', ...(store ? JSON.parse(store) : {}) }));
   await page.goto(`https://github.com/acme/w/pull/${pr}`);
   for (const v of vendor) await page.addScriptTag({ content: v });
   await page.addScriptTag({ content: script });
