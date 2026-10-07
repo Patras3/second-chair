@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
-const { SC_LOGO, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor } =
-  new Function(`${source}\nreturn { SC_LOGO, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor };`)();
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'sentNote', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary } =
+  new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
   tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'abc123',
@@ -284,6 +285,9 @@ test('a triage is done when closed, when the final round was sent, or when marke
   assert.equal(doneInfo(r1), null, 'sending round 1 is not the end');
   const r2 = stateFor(payload({ round: 2, published_at: 't2' }), null);
   r2.sentAt = 's2';
+  r2.sentVia = 'server';
+  assert.equal(doneInfo(r2), null, 'with a server, the agent\'s close ends the work');
+  r2.sentVia = 'clipboard';
   assert.deepEqual(doneInfo(r2), { at: 's2', reason: 'final-sent' });
   const closed = stateFor(payload({ published_at: 't1', closed_at: 'c1' }), null);
   assert.deepEqual(doneInfo(closed), { at: 'c1', reason: 'closed' });
@@ -292,6 +296,7 @@ test('a triage is done when closed, when the final round was sent, or when marke
   assert.deepEqual(doneInfo(marked), { at: 'm1', reason: 'marked' });
   const review2 = stateFor(review({ round: 2, published_at: 't3' }), null);
   review2.sentAt = 's3';
+  review2.sentVia = 'clipboard';
   assert.equal(doneInfo(review2).reason, 'final-sent');
 });
 
@@ -319,9 +324,11 @@ test('a read-only card has no buttons, no editor and no note', () => {
   assert.match(buildCard(s, s.payload.items[0], 'inline', { readOnly: true }), /Decision:<\/span> <b>none<\/b>/);
 });
 
-test('a stored state whose final round was sent stays done without the server', () => {
-  const stored = JSON.parse(JSON.stringify({ ...stateFor(payload({ round: 2, published_at: 't2' }), null), sentAt: 's2' }));
-  assert.equal(doneInfo(stored).reason, 'final-sent');
+test('a stored state whose final round was sent stays past decide without the server', () => {
+  const sent = (via) => JSON.parse(JSON.stringify({ ...stateFor(payload({ round: 2, published_at: 't2' }), null), sentAt: 's2', sentVia: via }));
+  assert.equal(phaseOf(sent('server')), 'publishing', 'the cards stay hidden until the agent closes');
+  assert.equal(phaseOf(sent('clipboard')), 'done');
+  assert.equal(doneInfo(sent('clipboard')).reason, 'final-sent');
 });
 
 test('panel rows are grouped by file with general items first', () => {
@@ -393,4 +400,80 @@ test('the mark is one inline SVG in the text colour, with no old SC badge', () =
   const s = stateFor(payload(), null);
   s.decisions.T1.decision = 'fix'; s.payload.items[0].auto = true;
   assert.ok(buildCard(s, s.payload.items[0], 'inline', { expanded: false }).includes(SC_LOGO), 'the compact line carries the mark');
+});
+
+const at = (round, over = {}) => stateFor(payload({ round, ...over }), null);
+const decideAll = (s, key) => { for (const it of s.payload.items) s.decisions[it.thread_id].decision = key; return s; };
+
+test('phaseOf walks a round from decide to waiting, publishing and done', () => {
+  assert.equal(phaseOf(null), 'empty');
+  const s1 = decideAll(at(1), 'reply');
+  assert.equal(phaseOf(s1), 'decide');
+  s1.sentAt = 't'; s1.sentVia = 'server';
+  assert.equal(phaseOf(s1), 'waiting');
+  const s2 = decideAll(at(2), 'publish');
+  s2.sentAt = 't'; s2.sentVia = 'server';
+  assert.equal(phaseOf(s2), 'publishing');
+  s2.payload.closed_at = 'c';
+  assert.equal(phaseOf(s2), 'done');
+});
+
+test('a final send with Revise waits for a new round 2, also offline', () => {
+  const s = decideAll(at(2), 'publish');
+  s.decisions.T1.decision = 'revise'; s.decisions.T1.note = 'shorter';
+  assert.equal(hasRevise(s), true);
+  s.sentAt = 't'; s.sentVia = 'server';
+  assert.equal(phaseOf(s), 'waiting');
+  s.sentVia = 'clipboard';
+  assert.equal(phaseOf(s), 'waiting');
+  assert.equal(doneInfo(s), null);
+});
+
+test('an offline final send is done in this browser', () => {
+  const s = decideAll(at(2), 'publish');
+  s.sentAt = 't'; s.sentVia = 'clipboard';
+  assert.equal(phaseOf(s), 'done');
+});
+
+test('the status line names whose turn it is', () => {
+  const s = at(1);
+  assert.equal(statusOf(s, 'decide').who, 'you');
+  assert.match(statusOf(s, 'decide').text, /^Your turn\. .*Nothing is posted yet\.$/);
+  assert.equal(statusOf(s, 'decide').warn, null);
+  assert.match(statusOf(at(2), 'decide').text, /Only Publish posts/);
+  const r = stateFor(review(), null);
+  assert.match(statusOf(r, 'decide').text, /draft that only you can see/);
+  assert.match(statusOf(r, 'decide').warn, /Do not submit the review on GitHub yet/);
+  assert.match(statusOf(r, 'waiting').warn, /Do not submit/);
+  s.sentAt = '2026-10-07T08:09:00Z';
+  assert.equal(statusOf(s, 'waiting').who, 'agent');
+  assert.match(statusOf(s, 'waiting').text, /^Agent's turn\. It makes the fixes .* Sent /);
+  assert.match(statusOf(s, 'waiting', { pickedUpAt: '2026-10-07T08:09:20Z' }).text, /The agent picked up your decisions at /);
+  const rev = decideAll(at(2), 'publish');
+  rev.decisions.T1.decision = 'revise';
+  assert.match(statusOf(rev, 'waiting').text, /new versions you asked for/);
+  assert.match(statusOf(decideAll(at(2), 'publish'), 'publishing').text, /pushes the commits and posts/);
+  const rp = stateFor(review({ round: 2 }), null);
+  rp.submit = 'COMMENT';
+  assert.match(statusOf(rp, 'publishing').text, /updates your draft review on GitHub\. Then it submits it as Comment\./);
+  assert.equal(statusOf(s, 'done', { published: { items: {} } }).who, null);
+});
+
+test('publishedSummary counts what reached GitHub', () => {
+  const s = decideAll(at(2), 'publish');
+  s.decisions.G.decision = 'hold';
+  assert.equal(publishedSummary(s, { items: { T1: { action: 'replied', url: 'u' } } }), 'Posted 1 reply. 1 not posted.');
+  assert.equal(publishedSummary(s, { items: {} }), 'Closed. Nothing was posted.');
+  const r = stateFor(review({ round: 2 }), null);
+  assert.match(publishedSummary(r, { items: { C1: { action: 'kept' } } }), /^Your review is ready and still a draft: submit it on GitHub, Files changed, Review changes, Submit\.$/);
+  assert.equal(publishedSummary(r, { items: { REVIEW: { action: 'submitted', event: 'REQUEST_CHANGES' } } }), 'Submitted as Request changes.');
+});
+
+test('a reply the agent rewrote clears the old decision and its note', () => {
+  const s = at(2);
+  s.decisions.T1 = { decision: 'revise', note: 'shorter', reply: 'Will do.', replyEdited: false };
+  const p = payload({ round: 2, published_at: 'p2' });
+  p.items[0] = { ...p.items[0], reply_en: 'Done.' };
+  const next = stateFor(p, s);
+  assert.deepEqual([next.decisions.T1.decision, next.decisions.T1.note], [null, '']);
 });

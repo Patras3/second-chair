@@ -68,6 +68,15 @@ const SC_DECISIONS = {
   },
 };
 
+// The modes as the commands name them; the payload keeps `reply` for respond.
+const SC_MODE_NAME = { reply: 'Respond', review: 'Review' };
+// Review submit events, as GitHub names them, with what each does.
+const SC_EVENTS = [
+  { key: 'COMMENT', label: 'Comment', help: 'Submit the review as a comment, without approving or blocking.' },
+  { key: 'APPROVE', label: 'Approve', help: 'Submit the review and approve the pull request.' },
+  { key: 'REQUEST_CHANGES', label: 'Request changes', help: 'Submit the review and ask for changes before merging. Needs a review body.' },
+];
+
 function modeOf(payload) {
   return payload?.mode ?? 'reply';
 }
@@ -160,7 +169,7 @@ function stateFor(payload, previous) {
     const before = old && !old.replyEdited ? previous.payload.items.find((x) => x.thread_id === it.thread_id) : null;
     const changed = Boolean(old) && !old.replyEdited && (before?.reply_en ?? '') !== (it.reply_en ?? '');
     decisions[it.thread_id] = old
-      ? { decision: changed ? null : old.decision, note: old.note ?? '', reply: old.replyEdited ? old.reply : (it.reply_en ?? ''), replyEdited: Boolean(old.replyEdited) }
+      ? { decision: changed ? null : old.decision, note: changed ? '' : old.note ?? '', reply: old.replyEdited ? old.reply : (it.reply_en ?? ''), replyEdited: Boolean(old.replyEdited) }
       : { decision: null, note: '', reply: it.reply_en ?? '', replyEdited: false };
   }
   // A send answers one publication of the proposals; a new publication needs a new send.
@@ -171,14 +180,80 @@ function stateFor(payload, previous) {
   return { payload, decisions, sentAt, sentVia, doneAt };
 }
 
+/** True when the user asked the agent for a new version of at least one item. */
+function hasRevise(state) {
+  return state.payload.items.some((it) => effective(state, it).decision === 'revise');
+}
+
 /** Why and since when this pull request's triage is over, or null while it is open. */
 function doneInfo(state) {
   if (!state) return null;
   const p = state.payload;
   if (p.closed_at) return { at: p.closed_at, reason: 'closed' };
   if (state.doneAt) return { at: state.doneAt, reason: 'marked' };
-  if (state.sentAt && p.round === SC_FINAL_ROUND) return { at: state.sentAt, reason: 'final-sent' };
+  // Only an offline final send ends the work here. With a server, the agent's close after publish does.
+  if (state.sentAt && state.sentVia === 'clipboard' && p.round === SC_FINAL_ROUND && !hasRevise(state)) return { at: state.sentAt, reason: 'final-sent' };
   return null;
+}
+
+/**
+ * Where a pull request's work stands: `empty` (nothing loaded), `decide` (the user's turn), `waiting` (the agent
+ * prepares the next round), `publishing` (the agent carries out the final round) or `done`.
+ */
+function phaseOf(state) {
+  if (!state) return 'empty';
+  if (doneInfo(state)) return 'done';
+  if (!state.sentAt) return 'decide';
+  return state.payload.round < SC_FINAL_ROUND || hasRevise(state) ? 'waiting' : 'publishing';
+}
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/** What reached GitHub, for the done view, from the server's record of the final round. */
+function publishedSummary(state, published) {
+  const items = published?.items ?? {};
+  if (modeOf(state.payload) === 'review') {
+    const review = items.REVIEW;
+    if (review) return `Submitted as ${SC_EVENTS.find((e) => e.key === review.event)?.label ?? review.event}.`;
+    if (!Object.keys(items).length) return 'Closed. Nothing was changed on GitHub.';
+    return 'Your review is ready and still a draft: submit it on GitHub, Files changed, Review changes, Submit.';
+  }
+  const posted = Object.values(items).filter((x) => x.action === 'replied').length;
+  if (!posted) return 'Closed. Nothing was posted.';
+  const rest = state.payload.items.length - posted;
+  return `Posted ${plural(posted, 'reply', 'replies')}.${rest ? ` ${rest} not posted.` : ''}`;
+}
+
+/** The status line: whose turn it is and what happens, plus a warning that stays while it matters. */
+function statusOf(state, phase, live = {}) {
+  const p = state.payload;
+  const review = modeOf(p) === 'review';
+  const round1 = p.round < SC_FINAL_ROUND;
+  const warn = review && (phase === 'decide' || phase === 'waiting') ? 'Do not submit the review on GitHub yet. It still holds comments you have not decided.' : null;
+  let who = null;
+  let text = '';
+  if (phase === 'decide') {
+    who = 'you';
+    text = review
+      ? (round1 ? 'Your turn. Decide each comment. Your review stays a draft that only you can see.' : 'Your turn. Approve the final comments, and choose what happens to the review.')
+      : (round1 ? 'Your turn. Decide each thread. Nothing is posted yet.' : 'Your turn. Approve the final replies. Only Publish posts.');
+  } else if (phase === 'waiting') {
+    who = 'agent';
+    text = !round1 ? 'Agent\'s turn. It writes the new versions you asked for. Round 2 opens here again.'
+      : review ? 'Agent\'s turn. It rewrites the comments you asked to revise. Round 2 opens here.'
+        : 'Agent\'s turn. It makes the fixes and commits them, without pushing. Round 2 opens here.';
+    text += live.pickedUpAt ? ` The agent picked up your decisions at ${formatTime(live.pickedUpAt)}.` : ` Sent ${formatTime(state.sentAt)}.`;
+  } else if (phase === 'publishing') {
+    who = 'agent';
+    const event = SC_EVENTS.find((e) => e.key === state.submit);
+    text = review
+      ? `Agent's turn. It updates your draft review on GitHub.${event ? ` Then it submits it as ${event.label}.` : ''}`
+      : 'Agent\'s turn. It pushes the commits and posts the replies you approved.';
+  } else if (phase === 'done') {
+    const info = doneInfo(state);
+    text = info?.reason === 'marked' ? 'Marked as done.' : info?.reason === 'final-sent' ? 'Sent through the clipboard. The agent posts what you approved.' : publishedSummary(state, live.published);
+  }
+  return { who, text, warn };
 }
 
 /** A readable local time; a value that is not a date shows as it came. */
