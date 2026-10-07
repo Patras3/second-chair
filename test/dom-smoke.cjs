@@ -98,10 +98,10 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await keys.keyboard.press('2');
   check((await keys.textContent('.sc-row[data-sc-item=T2] .sc-label')).trim() === 'Fix', 'j, j, j then 2 decides Fix on the third thread');
   await keys.keyboard.press('e');
-  check(await keys.locator(`${card('T2')} textarea.sc-reply`).count() === 1, 'e opens Write');
+  check(await keys.locator(`${card('T2')} textarea.sc-reply`).count() === 1, 'e opens the editor');
   await keys.close();
 
-  await page.click(`${card('T1')} [data-sc-act=tab][data-sc-val=write]`);
+  await page.click(`${card('T1')} [data-sc-act=edit]`);
   const noScroll = await page.evaluate((s) => { const t = document.querySelector(`${s} textarea`); return t && t.scrollHeight <= t.clientHeight + 4; }, card('T1'));
   check(noScroll, 'the reply editor is tall enough to need no scrolling');
   await page.fill(`${card('T1')} textarea`, 'Edited reply.');
@@ -233,7 +233,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   });
   const rv = await openPage(browser, port, null, 8);
   await rv.waitForSelector(card('C1'));
-  check((await rv.textContent(card('C1'))).includes('Comment to post'), 'a review comment card says Comment to post');
+  check((await rv.textContent(card('C1'))).includes('Comment · stays in your draft review'), 'a review comment card says where its text goes');
   await rv.click(`${card('C1')} [data-sc-val=revise]`);
   await rv.click('.sc-toggle');
   await rv.click(`.sc-yourreview ${card('BODY', 'panel')} [data-sc-val=post]`);

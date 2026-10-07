@@ -426,11 +426,11 @@ function buildCard(state, item, where, view = {}) {
   const who = item.origin === 'user' ? '<b>Your draft comment</b>' : `<b>Second Chair</b> <span class="sc-muted">${review ? 'draft comment' : 'proposes'}</span>`;
   const links = threadLinks(p.repo, p.pr, item.comment_id);
   const jump = where === 'panel' && links
-    ? `<a href="#" data-sc-act="jump" data-sc-id="${id}">jump</a><a href="${esc(links.files)}">in files</a>`
+    ? `<button type="button" class="sc-link" data-sc-act="jump" data-sc-id="${id}">jump</button><a href="${esc(links.files)}">in files</a>`
     : '';
   const pos = view.position ? `<span class="sc-muted">${esc(view.position)}</span>` : '';
   const moves = view.position && !view.readOnly
-    ? `<a href="#" data-sc-act="prev" data-sc-id="${id}">‹</a><a href="#" data-sc-act="next" data-sc-id="${id}">›</a>`
+    ? `<button type="button" class="sc-link" data-sc-act="prev" data-sc-id="${id}" aria-label="Previous">‹</button><button type="button" class="sc-link" data-sc-act="next" data-sc-id="${id}" aria-label="Next">›</button>`
     : '';
   const hidden = view.hidden ? '<span class="sc-label" title="GitHub has not loaded this thread on the page">hidden</span>' : '';
   const cls = `sc-card${e.decision && !missingNote(state, item) ? ' sc-decided' : ''}${compact ? ' sc-compact' : ''}`;
@@ -439,16 +439,26 @@ function buildCard(state, item, where, view = {}) {
   if (compact) {
     const first = String(d.reply || field(item, 'summary')).split('\n').find((l) => l.trim()) ?? '';
     const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(p, e.decision))}</span>` : '';
-    return `${open}<div class="sc-oneline">${mark}${label}<span class="sc-oneline-text">${richText(first)}</span><a href="#" data-sc-act="expand" data-sc-id="${id}">expand</a></div></div>`;
+    return `${open}<div class="sc-oneline">${mark}${label}<span class="sc-oneline-text">${richText(first)}</span><button type="button" class="sc-link" data-sc-act="expand" data-sc-id="${id}">expand</button></div></div>`;
   }
   const context = [field(item, 'context'), field(item, 'fix') ? `**Plan:** ${field(item, 'fix')}` : ''].filter(Boolean).join('\n\n');
   const summary = field(item, 'summary');
   const commits = Array.isArray(item.commits) && item.commits.length ? `<div class="sc-commits">Commits: ${item.commits.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : '';
   const needNote = missingNote(state, item);
-  const reply = view.editing && !view.readOnly
-    ? `<textarea class="sc-reply" data-sc-field="reply" data-sc-id="${id}" rows="${rowsFor(d.reply, where === 'panel' ? 70 : 110)}">${esc(d.reply)}</textarea>`
-    : `<div class="sc-md markdown-body">${renderMarkdown(d.reply) || '<span class="sc-empty">Nothing to post.</span>'}</div>`;
-  const tabs = view.readOnly ? '' : `<div class="sc-tabs"><a href="#" class="sc-tab${view.editing ? ' sc-tab-on' : ''}" data-sc-tab="write" data-sc-act="tab" data-sc-val="write" data-sc-id="${id}">Write</a><a href="#" class="sc-tab${view.editing ? '' : ' sc-tab-on'}" data-sc-tab="preview" data-sc-act="tab" data-sc-val="preview" data-sc-id="${id}">Preview</a></div>`;
+  // The box shows the text as GitHub will show it. Edit swaps in a textarea; the user's text then wins.
+  const editable = !view.readOnly;
+  const editingNow = view.editing && editable;
+  const shown = `<div class="sc-md markdown-body">${renderMarkdown(d.reply) || '<span class="sc-empty">Nothing to post.</span>'}</div>`;
+  const reply = editingNow
+    ? `<textarea class="sc-reply" data-sc-field="reply" data-sc-id="${id}" rows="${rowsFor(d.reply, where === 'panel' ? 70 : 110)}">${esc(d.reply)}</textarea><div class="sc-hint">${esc("Your text replaces the agent's. Esc to finish.")}</div>`
+    : editable ? `<div class="sc-preview" data-sc-act="edit" data-sc-id="${id}" title="Click to edit">${shown}</div>` : shown;
+  const caption = review
+    ? (item.comment_id ? 'Comment · stays in your draft review' : 'Review body · added to your review')
+    : p.round < SC_FINAL_ROUND ? 'Draft reply · posted only if you approve it in round 2' : 'Reply · posted when you choose Publish';
+  const undo = d.replyEdited && editable ? `<button type="button" class="sc-link" data-sc-act="undo" data-sc-id="${id}">Undo my edits</button>` : '';
+  const tool = !editable ? '' : editingNow
+    ? `<button type="button" class="sc-link" data-sc-act="preview" data-sc-id="${id}">Preview</button>`
+    : `<button type="button" class="sc-link" data-sc-act="edit" data-sc-id="${id}" title="Change the text. Your text replaces the agent's.">✎ Edit</button>`;
   const original = item.origin === 'user' && item.original_en && item.original_en !== d.reply
     ? `<details class="sc-original"><summary>Your original</summary><div class="sc-md markdown-body">${renderMarkdown(item.original_en)}</div></details>` : '';
   const buttons = decisionsFor(p).map((b, i) => {
@@ -461,15 +471,15 @@ function buildCard(state, item, where, view = {}) {
   const footer = view.readOnly
     ? `<div class="sc-card-foot"><span class="sc-muted">Decision:</span> <b>${esc(e.decision ? decisionLabel(p, e.decision) : 'none')}</b></div>`
     : `<div class="sc-card-foot"><div class="sc-seg">${buttons}</div><input class="sc-note${needNote ? ' sc-note-needed' : ''}" data-sc-field="note" data-sc-id="${id}" placeholder="${needNote ? 'What should change? Revise needs a note' : 'Note for the agent (optional)'}" value="${esc(d.note)}"></div>`;
-  const expander = e.auto || view.sent || view.done ? `<a href="#" data-sc-act="expand" data-sc-id="${id}">collapse</a>` : '';
+  const expander = e.auto || view.sent || view.done ? `<button type="button" class="sc-link" data-sc-act="expand" data-sc-id="${id}">collapse</button>` : '';
   return `${open}
   <div class="sc-card-head">${mark}${who}${verdictLabel}${hidden}<span class="sc-head-right">${pos}${moves}${jump}${expander}</span></div>
   <div class="sc-card-body">
     ${summary ? `<div class="sc-summary sc-md">${renderMarkdown(summary)}</div>` : ''}
     ${context ? `<div class="sc-foryou"><div class="sc-foryou-title">For you <span class="sc-muted">· never posted</span></div><div class="sc-md markdown-body">${renderMarkdown(context)}</div></div>` : ''}
     ${commits}
-    <div class="sc-caption">${review ? (item.comment_id ? 'Comment to post' : 'Review body') : 'Reply to post'}${d.replyEdited ? ' <span class="sc-edited">· edited</span>' : ''}</div>
-    <div class="sc-reply-box">${tabs}${reply}</div>
+    <div class="sc-caption"><span>${caption}${d.replyEdited ? ' <span class="sc-edited">· edited by you</span>' : ''}</span><span class="sc-caption-tools">${undo}${tool}</span></div>
+    <div class="sc-reply-box${editingNow ? ' sc-editing' : ''}">${reply}</div>
     ${original}
   </div>
   ${footer}
@@ -534,18 +544,18 @@ function buildPanelList(state, openId, filterKey, viewOf) {
     const e = effective(state, it);
     const v = viewOf(it);
     const { decided, icon, label } = rowParts(state, it, v);
-    const meta = [esc(it.author ?? 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', v.hidden ? '<span class="sc-hidden">not loaded on page</span>' : '', Array.isArray(it.commits) && it.commits.length ? `commit <code>${esc(it.commits[0])}</code>` : ''].filter(Boolean).join(' · ');
+    const meta = [esc(it.author ?? 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', v.hidden ? `<span class="sc-hidden">${modeOf(p) === 'review' ? 'folded on GitHub · decide here' : 'not loaded on page'}</span>` : '', Array.isArray(it.commits) && it.commits.length ? `commit <code>${esc(it.commits[0])}</code>` : ''].filter(Boolean).join(' · ');
     const open = it.thread_id === openId;
     return `<div class="sc-row${decided ? ' sc-decided' : ''}${open ? ' sc-selected' : ''}" data-sc-item="${esc(it.thread_id)}">
   <div class="sc-row-main" data-sc-act="toggle" data-sc-id="${esc(it.thread_id)}">${icon}<div class="sc-row-text"><div class="sc-row-sum">${richText(field(it, 'summary') || String(it.reply_en ?? '').split('\n')[0])}</div><div class="sc-row-meta">${meta}</div></div>${label}</div>
-  ${open && (v.expandedInPanel || v.hidden || !it.comment_id) ? buildCard(state, it, 'panel', { ...v, expanded: true }) : ''}
+  ${open && (v.panelOpen || v.hidden || !it.comment_id) ? buildCard(state, it, 'panel', { ...v, expanded: true }) : ''}
 </div>`;
   }).join('')}`).join('');
 }
 
 function buildFilterBar(state, filterKey) {
   const count = (test) => state.payload.items.filter((it) => test(effective(state, it))).length;
-  const tabs = SC_FILTERS.map((f) => `<a href="#" class="sc-ftab${f.key === filterKey ? ' sc-ftab-on' : ''}" data-sc-act="filter" data-sc-val="${f.key}">${esc(f.label)}<b>${count(f.test)}</b></a>`).join('');
+  const tabs = SC_FILTERS.map((f) => `<button type="button" class="sc-ftab${f.key === filterKey ? ' sc-ftab-on' : ''}" data-sc-act="filter" data-sc-val="${f.key}">${esc(f.label)}<b>${count(f.test)}</b></button>`).join('');
   const options = decisionsFor(state.payload).map((b) => `<option value="d:${b.key}"${`d:${b.key}` === filterKey ? ' selected' : ''}>${esc(b.label)} (${count((e) => e.decision === b.key)})</option>`).join('');
   return `<div class="sc-tabbar">${tabs}<select class="sc-fdecision" data-sc-act="filterselect"><option value="">Decision</option>${options}</select></div>`;
 }
@@ -567,9 +577,9 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-progress i{display:block}.sc-p-mine{background:var(--fgColor-success,#1a7f37)}.sc-p-auto{background:var(--fgColor-muted,#8c959f)}
 .sc-done-label{color:var(--fgColor-done,#8250df);border-color:var(--fgColor-done,#8250df);background:var(--bgColor-done-muted,#fbefff)}
 .sc-menu{position:absolute;right:14px;top:48px;z-index:2;width:220px;padding:6px 0;background:var(--overlay-bgColor,var(--bgColor-default,#fff));border:1px solid var(--borderColor-default,#d0d7de);border-radius:8px;box-shadow:var(--shadow-floating-medium,0 8px 24px rgba(140,149,159,.3))}
-.sc-menu a{display:block;padding:6px 14px;color:inherit!important;text-decoration:none!important}.sc-menu a:hover{background:var(--bgColor-muted,#f6f8fa)}.sc-menu hr{border:0;border-top:1px solid var(--borderColor-default,#d0d7de);margin:6px 0}.sc-menu .sc-danger{color:var(--fgColor-danger,#d1242f)!important}
+.sc-menu .sc-link{display:block;width:100%;text-align:left;padding:6px 14px;color:inherit}.sc-menu .sc-link:hover{background:var(--bgColor-muted,#f6f8fa);text-decoration:none}.sc-menu hr{border:0;border-top:1px solid var(--borderColor-default,#d0d7de);margin:6px 0}.sc-menu .sc-danger{color:var(--fgColor-danger,#d1242f)!important}
 .sc-tabbar{display:flex;align-items:center;gap:2px;padding:0 10px;border-bottom:1px solid var(--borderColor-default,#d0d7de);overflow-x:auto}
-.sc-ftab{padding:8px;border-bottom:2px solid transparent;margin-bottom:-1px;color:inherit!important;text-decoration:none!important;white-space:nowrap}
+.sc-ftab{padding:8px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;color:inherit;font:inherit;cursor:pointer;white-space:nowrap}
 .sc-ftab-on{border-bottom-color:var(--underlineNav-borderColor-active,#fd8c73);font-weight:600}
 .sc-ftab b{font-weight:500;font-size:12px;margin-left:4px;padding:0 6px;border-radius:2em;background:var(--bgColor-neutral-muted,#afb8c133)}
 .sc-fdecision{margin-left:auto;font:12px system-ui;border:1px solid var(--borderColor-default,#d0d7de);border-radius:6px;background:var(--bgColor-muted,#f6f8fa);color:inherit;padding:2px 6px}
@@ -608,7 +618,7 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-card.sc-decided{border-left-color:var(--sc-success)}
 .sc-card-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;background:var(--sc-subtle);border-bottom:1px solid var(--sc-border);font-size:13px}
 .sc-head-right{margin-left:auto;display:flex;gap:10px;font-size:12px}
-.sc-head-right a{text-decoration:none}
+.sc-head-right a{text-decoration:none}.sc-head-right .sc-link{font-size:12px}
 .sc-logo{width:16px;height:16px;flex:none}
 .sc-panel-head .sc-logo{width:18px;height:18px}
 .sc-muted{color:var(--sc-muted)}
@@ -625,9 +635,12 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-caption{font-size:12px;font-weight:600;color:var(--sc-muted);margin-bottom:6px}
 .sc-edited{font-weight:400;color:var(--fgColor-severe,#bc4c00)}
 .sc-reply-box{border:1px solid var(--sc-border);border-radius:6px;overflow:hidden}
-.sc-tabs{display:flex;background:var(--sc-subtle);border-bottom:1px solid var(--sc-border);padding:0 8px}
-.sc-tab{padding:7px 12px;font-size:13px;color:var(--sc-muted)!important;margin-bottom:-1px;text-decoration:none!important}
-.sc-tab-on{background:var(--sc-canvas);border:1px solid var(--sc-border);border-bottom-color:var(--sc-canvas);border-radius:6px 6px 0 0;color:var(--fgColor-default,#1f2328)!important}
+.sc-link{border:0;background:none;padding:0;margin:0;font:inherit;color:var(--fgColor-accent,#0969da);cursor:pointer}
+.sc-link:hover{text-decoration:underline}
+.sc-caption{display:flex;align-items:baseline;gap:8px}.sc-caption-tools{margin-left:auto;display:flex;gap:12px;font-weight:400}
+.sc-preview{cursor:text}.sc-preview:hover{background:var(--bgColor-muted,#f6f8fa)}
+.sc-reply-box.sc-editing{border-color:var(--fgColor-accent,#0969da);box-shadow:0 0 0 1px var(--fgColor-accent,#0969da)}
+.sc-hint{padding:4px 12px;font-size:12px;color:var(--sc-muted);border-top:1px solid var(--sc-border);background:var(--sc-subtle)}
 .sc-reply-box .sc-md{padding:10px 12px}
 .sc-reply{display:block;width:100%;box-sizing:border-box;border:0;padding:10px 12px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--sc-canvas);color:inherit;resize:vertical;overflow:hidden;outline:none}
 .sc-original{margin-top:8px;font-size:13px}.sc-original summary{cursor:pointer;color:var(--sc-muted)}
@@ -671,7 +684,9 @@ function secondChairBootstrap() {
   // What polling learned about this round: when the agent picked the decisions up, and what publish recorded.
   let live = { pickedUpAt: null, revision: null, published: null };
   const POLL_MS = 5000;
+  // Inline cards that are unfolded, and threads whose card is open in the panel: two separate things.
   const expanded = new Set();
+  const panelOpen = new Set();
   const editing = new Set();
   const ui = (() => {
     try {
@@ -698,7 +713,7 @@ function secondChairBootstrap() {
   const itemById = (id) => state.payload.items.find((x) => x.thread_id === id);
   const viewOf = (it) => ({
     expanded: expanded.has(it.thread_id),
-    expandedInPanel: expanded.has(it.thread_id),
+    panelOpen: panelOpen.has(it.thread_id),
     editing: editing.has(it.thread_id),
     hidden: Boolean(it.comment_id) && !anchorFor(it),
     position: `${displayOrder(state.payload.items).indexOf(it) + 1} of ${state.payload.items.length}`,
@@ -784,7 +799,7 @@ function secondChairBootstrap() {
       return `<li><a href="${esc(x.url)}">${richText(field(it ?? {}, 'summary') || id)}</a></li>`;
     }).join('');
     return `<div class="sc-banner sc-banner-done"><b>Done</b> · ${esc(SC_DONE_REASON[info.reason])} ${esc(formatTime(info.at))}. ${esc(st.text)}${links ? `<ul class="sc-posted">${links}</ul>` : ''}
-  <div class="sc-small">Cards are hidden on the page. <a href="#" data-sc-act="showdone">${showDoneCards ? 'Hide cards' : 'Show cards on the page'}</a></div></div>`;
+  <div class="sc-small">Cards are hidden on the page. <button type="button" class="sc-link" data-sc-act="showdone">${showDoneCards ? 'Hide cards' : 'Show cards on the page'}</button></div></div>`;
   }
 
   function renderPanel() {
@@ -811,10 +826,10 @@ function secondChairBootstrap() {
   ${status}
 </div>`;
     const menu = menuOpen ? `<div class="sc-menu">
-  <a href="#" data-sc-act="fetch">Load from server</a><a href="#" data-sc-act="import">Load from clipboard</a><hr>
-  <a href="#" data-sc-act="wide">${ui.wide ? 'Narrow panel' : 'Half screen'}</a>
-  ${state && !info ? '<hr><a href="#" data-sc-act="markdone">Mark as done</a>' : ''}
-  ${state ? '<a href="#" class="sc-danger" data-sc-act="clear">Clear from this browser</a>' : ''}</div>` : '';
+  <button type="button" class="sc-link" data-sc-act="fetch">Load from server</button><button type="button" class="sc-link" data-sc-act="import">Load from clipboard</button><hr>
+  <button type="button" class="sc-link" data-sc-act="wide">${ui.wide ? 'Narrow panel' : 'Half screen'}</button>
+  ${state && !info ? '<hr><button type="button" class="sc-link" data-sc-act="markdone">Mark as done</button>' : ''}
+  ${state ? '<button type="button" class="sc-link sc-danger" data-sc-act="clear">Clear from this browser</button>' : ''}</div>` : '';
     const banner = info ? doneBanner(info) : '';
     const body = state ? itemById('BODY') : null;
     const lock = ph === 'decide' ? submitLock(state) : null;
@@ -826,7 +841,7 @@ function secondChairBootstrap() {
       foot = `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete && !lock ? '' : 'disabled'}>${sendLabel(pr)}</button><div class="sc-lock"${lock ? '' : ' hidden'}>${esc(lock ?? '')}</div>${keys}</div>`;
     } else if (ph === 'waiting') {
       const what = state.payload.round < SC_FINAL_ROUND ? `Waiting for round ${state.payload.round + 1}` : `Waiting for the new round ${state.payload.round}`;
-      foot = `<div class="sc-panel-foot"><div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>${what}</div><div class="sc-keys"><a href="#" data-sc-act="resend">Edit and send again</a></div></div>`;
+      foot = `<div class="sc-panel-foot"><div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>${what}</div><div class="sc-keys"><button type="button" class="sc-link" data-sc-act="resend">Edit and send again</button></div></div>`;
     } else if (ph === 'publishing') {
       foot = '<div class="sc-panel-foot"><div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>The agent is publishing</div></div>';
     } else if (ph === 'done') {
@@ -1098,7 +1113,9 @@ function secondChairBootstrap() {
     if (!it?.comment_id) return;
     const anchor = await reveal(it);
     if (!anchor) {
-      message = { error: true, text: 'GitHub did not load this thread on the page. Use "in files", or open the conversation tab.' };
+      // Files changed folds pending review comments. The panel is the place to decide them, so open the card there.
+      if (modeOf(state.payload) === 'review') panelOpen.add(id);
+      else message = { error: true, text: 'GitHub did not load this thread on the page. Use "in files", or open the conversation tab.' };
       renderPanel();
       return;
     }
@@ -1144,11 +1161,26 @@ function secondChairBootstrap() {
     return el;
   }
 
+  /** Puts the cursor in the reply editor of a thread, in the card the user works in. */
+  function focusEditor(id, where) {
+    const area = document.querySelector(`.sc-card[data-sc-where="${where}"][data-sc-card="${CSS.escape(id)}"] textarea.sc-reply`)
+      ?? document.querySelector(`.sc-card[data-sc-card="${CSS.escape(id)}"] textarea.sc-reply`);
+    if (area) {
+      autosize(area);
+      area.focus();
+    }
+  }
+
+  // The listeners run in the capture phase, before any page code: on Files changed, GitHub's own handlers take clicks
+  // on links and buttons inside a thread, and a bubbling listener on document never saw them.
   document.addEventListener('click', async (e) => {
     const el = ownControl(e.target, '[data-sc-act]');
     if (!el) return;
     const act = el.dataset.scAct;
     const id = el.dataset.scId;
+    // A link inside the shown text still opens; only a click on the text itself starts editing.
+    if (act === 'edit' && el.classList.contains('sc-preview') && e.target.closest('a[href]')) return;
+    e.stopPropagation();
     if (act !== 'toggle') e.preventDefault();
     if (act !== 'menu' && menuOpen) {
       // Any other action closes the menu.
@@ -1237,19 +1269,22 @@ function secondChairBootstrap() {
     } else if (act === 'expand') {
       toggleSet(expanded, id);
       refreshThread(id);
-    } else if (act === 'tab') {
-      if (el.dataset.scVal === 'write') editing.add(id);
-      else editing.delete(id);
+    } else if (act === 'edit') {
+      if (!state || locked()) return;
+      editing.add(id);
       expanded.add(id);
       refreshThread(id);
-      if (el.dataset.scVal === 'write') {
-        const where = el.closest('.sc-card')?.dataset.scWhere;
-        const area = document.querySelector(`.sc-card[data-sc-where="${where}"][data-sc-card="${CSS.escape(id)}"] textarea.sc-reply`);
-        if (area) {
-          autosize(area);
-          area.focus();
-        }
-      }
+      focusEditor(id, el.closest('.sc-card')?.dataset.scWhere);
+    } else if (act === 'preview') {
+      editing.delete(id);
+      refreshThread(id);
+    } else if (act === 'undo') {
+      const d = state?.decisions[id];
+      if (!d || locked()) return;
+      d.reply = itemById(id).reply_en ?? '';
+      d.replyEdited = false;
+      save();
+      refreshThread(id);
     } else if (act === 'decide') {
       const d = state?.decisions[id];
       const key = el.dataset.scVal;
@@ -1258,19 +1293,26 @@ function secondChairBootstrap() {
       save();
       refreshThread(id);
     }
-  });
+  }, true);
 
   document.addEventListener('change', (e) => {
     const el = ownControl(e.target, '[data-sc-act=filterselect]');
     if (!el) return;
+    e.stopPropagation();
     ui.filter = el.value || 'all';
     saveUi();
     renderPanel();
-  });
+  }, true);
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && e.target?.matches?.('.sc-reply, .sc-note')) e.target.blur();
-  });
+    if (e.key !== 'Escape' || !ownControl(e.target, '.sc-reply, .sc-note')) return;
+    e.stopPropagation();
+    if (e.target.matches('.sc-reply')) {
+      // Esc ends editing and shows the text as GitHub will.
+      editing.delete(e.target.dataset.scId);
+      refreshThread(e.target.dataset.scId);
+    } else e.target.blur();
+  }, true);
 
   document.addEventListener('keydown', (e) => {
     if (!state || !ui.open || e.altKey || e.ctrlKey || e.metaKey) return;
@@ -1281,7 +1323,7 @@ function secondChairBootstrap() {
     if ((arrows && e.key === 'ArrowDown') || e.key === 'j') move(1);
     else if ((arrows && e.key === 'ArrowUp') || e.key === 'k') move(-1);
     else if (e.key === 'Enter' && openId) {
-      toggleSet(expanded, openId);
+      toggleSet(panelOpen, openId);
       refreshThread(openId);
     } else if (openId && /^[1-9]$/.test(e.key)) {
       const b = decisionsFor(state.payload)[Number(e.key) - 1];
@@ -1293,8 +1335,9 @@ function secondChairBootstrap() {
     } else if (openId && e.key === 'e' && !locked()) {
       editing.add(openId);
       expanded.add(openId);
+      if (!inlineCard(openId)) panelOpen.add(openId);
       refreshThread(openId);
-      document.querySelector(`.sc-card[data-sc-card="${CSS.escape(openId)}"] textarea.sc-reply`)?.focus();
+      focusEditor(openId, inlineCard(openId) ? 'inline' : 'panel');
     } else return;
     e.preventDefault();
     e.stopPropagation();
@@ -1303,6 +1346,7 @@ function secondChairBootstrap() {
   document.addEventListener('input', (e) => {
     const el = ownControl(e.target, '.sc-paste, [data-sc-field]');
     if (!el) return;
+    e.stopPropagation();
     if (el.classList.contains('sc-paste')) {
       if (el.value.trim().startsWith('{') && el.value.trim().endsWith('}')) adopt(parsePayload(el.value), 'clipboard');
       return;
@@ -1325,7 +1369,7 @@ function secondChairBootstrap() {
     document.querySelectorAll(`[data-sc-field="${name}"][data-sc-id="${CSS.escape(id)}"]`).forEach((other) => {
       if (other !== el) other.value = el.value;
     });
-  });
+  }, true);
 
   function needsRender() {
     const now = parseLocation(location.pathname);
@@ -1352,6 +1396,7 @@ function secondChairBootstrap() {
       stopPoll();
       showDoneCards = false;
       expanded.clear();
+      panelOpen.clear();
       editing.clear();
       renderAll(true);
       sync(false);

@@ -83,7 +83,7 @@ test('the card reads as the next comment: header, For you note, reply box, decis
   assert.match(html, /class="sc-card-head"[\s\S]*Second Chair[\s\S]*proposes[\s\S]*sc-label sc-v-fix">Fix/);
   assert.match(html, /class="sc-foryou"[\s\S]*For you[\s\S]*never posted[\s\S]*<code>foo\(\)<\/code>/);
   assert.ok(html.includes('change &lt;x&gt;'), 'reviewer text is escaped');
-  assert.match(html, /class="sc-reply-box"[\s\S]*data-sc-val="write"[\s\S]*data-sc-val="preview"/);
+  assert.match(html, /data-sc-act="edit"[^>]*>✎ Edit<\/button>[\s\S]*class="sc-reply-box"/);
   assert.match(html, /class="sc-md markdown-body/);
   assert.match(html, /sc-btn sc-suggested" [^>]*data-sc-val="fix"/);
   assert.match(html, /<input class="sc-note"/);
@@ -118,7 +118,7 @@ test('a comment the user wrote says so, and shows the original under a proposed 
   const html = buildCard(s, s.payload.items[0], 'inline');
   assert.ok(html.includes('Your draft comment'));
   assert.match(html, /<details class="sc-original"><summary>Your original<\/summary>[\s\S]*old words/);
-  assert.ok(html.includes('Comment to post'));
+  assert.ok(html.includes('Comment · stays in your draft review'));
 });
 
 test('the head shows the position with prev and next links, but not on a read-only card', () => {
@@ -248,8 +248,8 @@ test('review mode offers Post, Revise and Drop, and labels the text as a comment
   const s = stateFor(review(), null);
   const card = buildCard(s, s.payload.items[0], 'inline');
   assert.deepEqual([...card.matchAll(/data-sc-act="decide"[^>]*data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'revise', 'drop']);
-  assert.ok(card.includes('Comment to post'));
-  assert.ok(buildCard(s, s.payload.items[1], 'panel').includes('Review body'));
+  assert.ok(card.includes('Comment · stays in your draft review'));
+  assert.ok(buildCard(s, s.payload.items[1], 'panel').includes('Review body · added to your review'));
   assert.match(parsePayload(JSON.stringify(review({ mode: 'other' }))).error, /Unknown mode/);
   assert.match(parsePayload(JSON.stringify(review({ round: 3 }))).error, /Unknown round/);
 });
@@ -317,7 +317,7 @@ test('a read-only card has no buttons, no editor and no note', () => {
   const html = buildCard(s, s.payload.items[0], 'inline', { readOnly: true, expanded: true });
   assert.ok(!html.includes('data-sc-act="decide"'));
   assert.ok(!html.includes('data-sc-field="note"'));
-  assert.ok(!html.includes('data-sc-act="tab"'));
+  assert.ok(!html.includes('data-sc-act="edit"'));
   assert.ok(html.includes('Will do.'));
   assert.match(html, /Decision:<\/span> <b>Fix<\/b>/);
   s.decisions.T1.decision = null;
@@ -561,4 +561,46 @@ test('in review mode the body leaves the file list for the Your review block', (
   const s = review2([BODY(), C1]);
   assert.doesNotMatch(buildPanelList(s, null, 'all', () => ({})), /data-sc-item="BODY"/);
   assert.match(buildPanelList(stateFor(payload(), null), null, 'all', () => ({})), /data-sc-item="G"/);
+});
+
+test('no control is a link, so page code cannot take its clicks', () => {
+  const s = stateFor(payload(), null);
+  const html = buildCard(s, s.payload.items[0], 'panel', { position: '1 of 2', expanded: true })
+    + buildCard(s, s.payload.items[0], 'inline', { position: '1 of 2', sent: true })
+    + buildCard(s, s.payload.items[0], 'inline', { position: '1 of 2', expanded: true, sent: true, editing: true })
+    + buildPanelList(s, 'T1', 'all', () => ({ panelOpen: true })) + buildFilterBar(s, 'all');
+  assert.equal(/<a [^>]*href="#"/.test(html), false);
+  assert.match(html, /<button type="button" class="sc-link"[^>]*data-sc-act="edit"/);
+  assert.match(html, /<a href="https:\/\/github.com\/acme\/w\/pull\/7\/files#r11">in files<\/a>/, 'the link to the files tab stays a real link');
+});
+
+test('the caption says when the text goes out', () => {
+  const s = stateFor(payload(), null);
+  assert.match(buildCard(s, s.payload.items[0], 'inline', { expanded: true }), /Draft reply · posted only if you approve it in round 2/);
+  const r2 = stateFor(payload({ round: 2 }), null);
+  assert.match(buildCard(r2, r2.payload.items[0], 'inline', { expanded: true }), /Reply · posted when you choose Publish/);
+});
+
+test('editing shows the textarea with Preview and a hint, and an edited reply offers Undo my edits', () => {
+  const s = stateFor(payload(), null);
+  const editing = buildCard(s, s.payload.items[0], 'inline', { expanded: true, editing: true });
+  assert.match(editing, /<textarea class="sc-reply"/);
+  assert.match(editing, /data-sc-act="preview"/);
+  assert.match(editing, /Your text replaces the agent&#39;s\. Esc to finish\./);
+  assert.doesNotMatch(buildCard(s, s.payload.items[0], 'inline', { expanded: true }), /data-sc-act="undo"/);
+  s.decisions.T1.reply = 'mine'; s.decisions.T1.replyEdited = true;
+  assert.match(buildCard(s, s.payload.items[0], 'inline', { expanded: true }), /data-sc-act="undo"/);
+  assert.doesNotMatch(buildCard(s, s.payload.items[0], 'inline', { expanded: true, readOnly: true }), /data-sc-act="(edit|undo)"/);
+});
+
+test('the shown text starts editing when clicked, but not on a read-only card', () => {
+  const s = stateFor(payload(), null);
+  assert.match(buildCard(s, s.payload.items[0], 'inline', { expanded: true }), /<div class="sc-preview" data-sc-act="edit" data-sc-id="T1"/);
+  assert.doesNotMatch(buildCard(s, s.payload.items[0], 'inline', { expanded: true, readOnly: true }), /sc-preview" data-sc-act/);
+});
+
+test('a review comment folded on GitHub says to decide it here', () => {
+  const s = stateFor(review(), null);
+  assert.match(buildPanelList(s, null, 'all', () => ({ hidden: true })), /folded on GitHub · decide here/);
+  assert.match(buildPanelList(stateFor(payload(), null), null, 'all', () => ({ hidden: true })), /not loaded on page/);
 });

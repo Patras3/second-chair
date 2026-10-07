@@ -11,6 +11,9 @@ const { nodeRequest, installGm } = require('./gm-harness.cjs');
 const script = fs.readFileSync(path.join(__dirname, '..', 'userscript', 'second-chair.user.js'), 'utf8');
 const vendor = ['marked.min.js', 'purify.min.js'].map((f) => fs.readFileSync(path.join(__dirname, 'vendor', f), 'utf8'));
 const PAGE = '<html><head></head><body><div id="discussion_r11">comment 11</div><div style="height:800px"></div><div id="discussion_r22">comment 22</div><div style="height:1500px"></div></body></html>';
+// Like Files changed: page code around a thread takes clicks on links and buttons and stops them.
+const EATER = '<html><head></head><body><div id="eater"><div id="discussion_r11">comment 11</div></div><div style="height:800px"></div><div id="discussion_r22">comment 22</div><div style="height:1500px"></div>'
+  + '<script>document.getElementById("eater").addEventListener("click", (e) => { if (e.target.closest("a, button")) { e.preventDefault(); e.stopPropagation(); window.__eaten = (window.__eaten || 0) + 1; } });</script></body></html>';
 const proposals = (pr, round, over = {}) => ({
   tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr, round, head: `h${round}`,
   items: [
@@ -26,9 +29,9 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
 // The guide shows once per browser; these pages start as a browser that has seen it.
 const SEEN = { 'sc:guide': '1', 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) };
 
-async function openPage(browser, port, pr, store = SEEN) {
+async function openPage(browser, port, pr, store = SEEN, html = PAGE) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  await page.route(`https://github.com/acme/w/pull/${pr}`, (r) => r.fulfill({ contentType: 'text/html', body: PAGE }));
+  await page.route(`https://github.com/acme/w/pull/${pr}`, (r) => r.fulfill({ contentType: 'text/html', body: html }));
   await installGm(page, port, JSON.stringify(store));
   await page.goto(`https://github.com/acme/w/pull/${pr}`);
   for (const v of vendor) await page.addScriptTag({ content: v });
@@ -160,6 +163,32 @@ async function decideAndSend(page, key) {
   await rv.waitForSelector('.sc-wait');
   check((await api('GET', '/api/decisions?repo=acme/w&pr=11&round=2&peek=1')).body.submit === 'COMMENT', 'the decisions carry the submit');
   check(/Then it submits it as Comment/.test(await text(rv, '.sc-status')), 'the status says the agent will submit it');
+
+  // 11. Every control works inside page code that eats clicks, and editing is plain to see.
+  await api('PUT', '/api/proposals', proposals(12, 1));
+  const ed = await openPage(browser, port, 12, SEEN, EATER);
+  await ed.waitForSelector(card('T1'));
+  check(await ed.evaluate(() => document.querySelector('#eater .sc-card[data-sc-card=T1]') !== null), 'the card sits inside the click-eating container');
+  await ed.click('.sc-row-main[data-sc-id=T1]');
+  await ed.click(`${card('T1')} [data-sc-act=edit]`);
+  check(await ed.locator(`${card('T1')} textarea.sc-reply`).count() === 1, 'Edit opens the editor there');
+  check(await ed.locator(card('T1', 'panel')).count() === 0, 'editing inline opens no second copy in the panel');
+  check(await ed.evaluate(() => document.activeElement?.classList.contains('sc-reply')), 'and puts the cursor in it');
+  await ed.fill(`${card('T1')} textarea.sc-reply`, 'Mine.');
+  await ed.click(`${card('T1')} [data-sc-act=preview]`);
+  check((await text(ed, `${card('T1')} .sc-reply-box`)).includes('Mine.') && /edited by you/.test(await text(ed, `${card('T1')} .sc-caption`)), 'Preview shows the edited text, marked as yours');
+  await ed.click(`${card('T1')} [data-sc-act=undo]`);
+  check((await text(ed, `${card('T1')} .sc-reply-box`)).includes('One.') && !/edited/.test(await text(ed, `${card('T1')} .sc-caption`)), 'Undo my edits brings the agent text back');
+  await ed.click(`${card('T1')} .sc-preview`);
+  check(await ed.locator(`${card('T1')} textarea.sc-reply`).count() === 1, 'a click on the text starts editing');
+  await ed.keyboard.press('Escape');
+  check(await ed.locator(`${card('T1')} textarea.sc-reply`).count() === 0 && await ed.locator(`${card('T1')} .sc-preview`).count() === 1, 'Esc ends editing');
+  await ed.click(`${card('T1')} [data-sc-act=decide][data-sc-val=reply]`);
+  check(await ed.locator(`${card('T1')}.sc-decided`).count() === 1, 'a decision button works there');
+  await ed.click(`${card('T1')} [data-sc-act=next]`);
+  check(await ed.locator('.sc-row.sc-selected[data-sc-item=T2]').count() === 1, 'the next arrow works there');
+  check(await ed.evaluate(() => !window.__eaten), 'the page code never saw a click on our controls');
+  await ed.close();
 
   // 9. Polling pauses while the tab is hidden and resumes at once when it is visible.
   await tabA.evaluate(() => { const orig = window.__gmx; window.__calls = 0; window.__gmx = (r) => { window.__calls++; return orig(r); }; });
