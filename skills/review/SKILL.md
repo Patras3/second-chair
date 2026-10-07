@@ -64,6 +64,6 @@ The user can send a round again while you work on it (**Edit and send again**). 
 1. Run that `get` command. It prints the new decisions.
 2. Compare them with the decisions you worked from.
 3. Change the work to match: rewrite or restore the comments.
-4. Tell the user what changed, then build and push again.
+4. Tell the user what changed, then build and push again. When the changed decisions are round 2's and hold no `revise` any more, do not push: go on with `publish`.
 
 For any other error, show the user the message and wait for their instruction.

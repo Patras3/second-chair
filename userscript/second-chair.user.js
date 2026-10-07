@@ -163,7 +163,11 @@ function stateFor(payload, previous) {
   const keep = sameRound ? previous.decisions : {};
   const decisions = {};
   for (const it of payload.items) {
-    const old = keep[it.thread_id];
+    let old = keep[it.thread_id];
+    // A Revise asked the agent for a new version. Once a new publication brings it, the request is answered:
+    // start over from the agent's new text, even when the user had edited the old one.
+    const answered = old?.decision === 'revise' && (previous.payload.published_at ?? null) !== (payload.published_at ?? null);
+    if (answered) old = null;
     // A reply you edited survives a re-import; an untouched one takes the agent's new draft. A decision you
     // made on the old draft does not count for a new one: you approve the text that will be posted.
     const before = old && !old.replyEdited ? previous.payload.items.find((x) => x.thread_id === it.thread_id) : null;
@@ -222,7 +226,7 @@ function publishedSummary(state, published) {
     if (!Object.keys(items).length) return 'Closed. Nothing was changed on GitHub.';
     return 'Your review is ready and still a draft: submit it on GitHub, Files changed, Review changes, Submit.';
   }
-  const posted = Object.values(items).filter((x) => x.action === 'replied').length;
+  const posted = state.payload.items.filter((it) => items[it.thread_id]?.action === 'replied').length;
   if (!posted) return 'Closed. Nothing was posted.';
   const rest = state.payload.items.length - posted;
   return `Posted ${plural(posted, 'reply', 'replies')}.${rest ? ` ${rest} not posted.` : ''}`;
@@ -371,6 +375,8 @@ function buildExport(state, now) {
     pr: p.pr,
     round: p.round,
     head: p.head ?? null,
+    // The server refuses decisions for a publication the agent has replaced since.
+    published_at: p.published_at ?? null,
     exported_at: now,
     decisions: p.items.map((it) => {
       const d = state.decisions[it.thread_id];
@@ -885,7 +891,8 @@ function secondChairBootstrap() {
   /** The done banner: what reached GitHub, with links, and the switch for the cards. */
   function doneBanner(info) {
     const st = statusOf(state, 'done', live);
-    const links = Object.entries(live.published?.items ?? {}).filter(([, x]) => x.url).map(([id, x]) => {
+    // Only replies of this round, and only links to GitHub.
+    const links = Object.entries(live.published?.items ?? {}).filter(([id, x]) => itemById(id) && /^https:\/\/github\.com\//.test(x.url ?? '')).map(([id, x]) => {
       const it = itemById(id);
       return `<li><a href="${esc(x.url)}">${richText(field(it ?? {}, 'summary') || id)}</a></li>`;
     }).join('');
@@ -1092,6 +1099,23 @@ function secondChairBootstrap() {
     }
     renderPanel();
     schedulePoll();
+    loadPublished();
+  }
+
+  /** Once per page: what publish recorded, for a round the agent publishes or already closed. Polling does it later on. */
+  async function loadPublished() {
+    const ph = phase();
+    if (!state || live.published || (ph !== 'publishing' && ph !== 'done')) return;
+    const here = loc;
+    try {
+      const p = await api('GET', `/api/published?${roundQuery()}`);
+      if (here === loc && p.status === 200) {
+        live.published = p.body;
+        renderPanel();
+      }
+    } catch {
+      // The server is down; the banner says what it can without the record.
+    }
   }
 
   const roundQuery = () => `repo=${encodeURIComponent(loc.repo)}&pr=${loc.number}&round=${state.payload.round}`;
@@ -1159,7 +1183,7 @@ function secondChairBootstrap() {
         renderAll(true);
         return;
       }
-      if (r.status === 409 && /already sent round/.test(r.body?.error ?? '')) {
+      if (r.status === 409 && /already sent round|sent a new version/.test(r.body?.error ?? '')) {
         // The agent moved on while the user edited. The old round is gone, so load the new one.
         state.resendOf = null;
         save();
@@ -1293,7 +1317,11 @@ function secondChairBootstrap() {
         ui.open = panelShown;
         saveUi();
       }
-      if (!panelShown) guideOpen = false;
+      // Closing the panel over the guide dismisses it, like Got it.
+      if (!panelShown && guideOpen) {
+        GM_setValue('sc:guide', SC_GUIDE_VERSION);
+        guideOpen = false;
+      }
       renderPanel();
       if (panelShown) sync(false);
     } else if (act === 'guide') {

@@ -657,3 +657,23 @@ test('a card from an earlier pass says so and folds the earlier text', () => {
   assert.match(h, /<b>Second Chair<\/b> <span class="sc-muted">earlier pass<\/span>/);
   assert.match(h, /<summary>Earlier text<\/summary>/);
 });
+
+test('the export names the publication it answers', () => {
+  const s = stateFor(payload({ published_at: 'p7' }), null);
+  for (const it of s.payload.items) s.decisions[it.thread_id].decision = 'manual';
+  assert.equal(buildExport(s, 'now').published_at, 'p7');
+});
+
+test('a Revise clears on the new version, also when the user had edited the reply', () => {
+  const s = stateFor(payload({ round: 2, published_at: 'p1' }), null);
+  s.decisions.T1 = { decision: 'revise', note: 'shorter', reply: 'My own words.', replyEdited: true };
+  const p = payload({ round: 2, published_at: 'p2' });
+  p.items[0] = { ...p.items[0], reply_en: 'Shorter.' };
+  const next = stateFor(p, s);
+  assert.deepEqual(next.decisions.T1, { decision: null, note: '', reply: 'Shorter.', replyEdited: false });
+});
+
+test('the summary counts only the threads of this round', () => {
+  const s = decideAll(at(2), 'publish');
+  assert.equal(publishedSummary(s, { items: { T1: { action: 'replied' }, OLD1: { action: 'replied' }, OLD2: { action: 'replied' } } }), 'Posted 1 reply. 1 not posted.');
+});

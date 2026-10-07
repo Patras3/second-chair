@@ -287,3 +287,26 @@ test('status shows the revision and the pick-up', async () => {
   assert.equal(row.revision, 1);
   assert.equal(row.picked_up_at, null);
 });
+
+test('a new review cycle starts with no record of what the last cycle published', async () => {
+  const r2 = proposals({ pr: 110, mode: 'review', round: 2, items: [{ thread_id: 'BODY', comment_id: null, verdict: 'post', reply_en: 'b' }] });
+  await call('PUT', '/api/proposals', r2);
+  await call('POST', '/api/published', { repo: 'acme/w', pr: 110, round: 2, thread_id: 'REVIEW', action: 'submitted', event: 'COMMENT' });
+  await call('PUT', '/api/proposals', round2(110));
+  assert.ok((await call('GET', '/api/published?repo=acme/w&pr=110&round=2')).body.items.REVIEW, 'a re-push of round 2 keeps the record');
+  await call('PUT', '/api/proposals', proposals({ pr: 110, mode: 'review', items: [{ thread_id: 'BODY', comment_id: null, verdict: 'post', reply_en: 'b' }] }));
+  assert.deepEqual((await call('GET', '/api/published?repo=acme/w&pr=110&round=2')).body, { items: {} });
+});
+
+test('decisions that answer an older publication of the round are refused', async () => {
+  const p = proposals({ pr: 111 });
+  await call('PUT', '/api/proposals', p);
+  const first = (await call('GET', '/api/proposals?repo=acme/w&pr=111')).body.published_at;
+  await call('PUT', '/api/proposals', p);
+  const r = await call('POST', '/api/decisions', decisionsFor(p, { published_at: first }));
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /the agent sent a new version of round 1; decide there/);
+  const now = (await call('GET', '/api/proposals?repo=acme/w&pr=111')).body.published_at;
+  assert.equal((await call('POST', '/api/decisions', decisionsFor(p, { published_at: now }))).status, 200);
+  assert.equal((await call('POST', '/api/decisions', decisionsFor(p))).status, 200, 'a 1.0 page sends no published_at, and is not checked');
+});

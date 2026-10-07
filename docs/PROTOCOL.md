@@ -148,6 +148,7 @@ The userscript sends this when the user clicks **Send decisions**. `wait` and `g
 | `tool`, `kind` | string | `"second-chair"` and `"decisions"`. |
 | `mode` | string | `"reply"` or `"review"`. Always present. |
 | `repo`, `pr`, `round`, `head` | as in the proposals | Copied from the proposals they answer. |
+| `published_at` | string | The `published_at` of the proposals these decisions answer. The server refuses decisions for a publication the agent replaced since. A page from 1.0 leaves it out, and is not checked. |
 | `exported_at` | string | When the user sent them. |
 | `received_at` | string | Set by the server. |
 | `revision` | integer | Set by the server. `1` for the first send of a round, one more for every later send of the same round. |
@@ -173,6 +174,7 @@ The server refuses decisions with `409` when:
 - a `decision` is not a key of that mode and round;
 - a `revise` decision has an empty note;
 - `submit` is set outside review mode or round 2, or is not `COMMENT`, `APPROVE` or `REQUEST_CHANGES`;
+- `published_at` is set and differs from the proposals' `published_at`: the agent sent a new version of the round;
 - an item has no decision.
 
 The server also refuses a send with `409` once the agent pushed the next round after the earlier send: "the agent already sent round 2; decide there".
@@ -201,7 +203,7 @@ Rules for every request:
 | `GET /health` | | `200 {"ok": true, "tool": "second-chair", "pid": N, "version": "1.0.0"}`. `pid` is the server's process id. `stop` signals a process only when this `pid` matches the pid file. `version` is the version in the server's `package.json`. `start` restarts a server whose version is older than its own, or missing. It keeps a newer server. Needs no `X-Second-Chair` header. |
 | `GET /second-chair.user.js` | | `200` with the userscript, with the server's port written into it. Needs no `X-Second-Chair` header. |
 | `GET /api/proposals` | `?repo=O/N&pr=N[&round=R]` | `200` with the payload, `400` without a valid `repo` and `pr` or with a `round` that is not a whole number of 1 or more, `404` when there is none. Without `round`: the most recently pushed round, so a new round 1 wins over an older round 2. |
-| `PUT /api/proposals` | a proposals payload | `200 {"ok": true, "published_at": "…"}`, `400` with the reason, or `409` while round R or R-1 has a changed revision the agent has not read (see [Changed decisions](#changed-decisions)). It replaces that round's proposals and deletes that round's decisions. |
+| `PUT /api/proposals` | a proposals payload | `200 {"ok": true, "published_at": "…"}`, `400` with the reason, or `409` while round R or R-1 has a changed revision the agent has not read (see [Changed decisions](#changed-decisions)). It replaces that round's proposals and deletes that round's decisions. A round 1 starts a new cycle, so it also deletes the record of what `publish` did in the last cycle. |
 | `GET /api/decisions` | `?repo=O/N&pr=N&round=R[&peek=1]` | `200` with the decisions, `400` without `repo`, `pr` and `round`, `404` when there are none yet. Without `peek=1` the first read of a revision sets its `picked_up_at`. |
 | `POST /api/decisions` | a decisions payload | `200 {"ok": true, "revision": N}`, or `409` with the reason (see above). |
 | `POST /api/close` | `{"repo": "O/N", "pr": N}` | `200 {"ok": true, "closed_at": "…"}`, `400` without `repo` and `pr`, `404` when the pull request has no proposals. |

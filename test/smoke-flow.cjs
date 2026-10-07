@@ -84,6 +84,15 @@ async function decideAndSend(page, key) {
   await again.click('[data-sc-act=guidedone]');
   check(await again.evaluate(() => JSON.parse(window.__store['sc:ui']).open === true), 'closing an empty panel does not change the saved preference');
   await again.close();
+  const closer = await openPage(browser, port, 5, { 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: false }) });
+  await closer.waitForSelector('.sc-guide');
+  await closer.click('[data-sc-act=panel][aria-label=Close]');
+  const closedStore = await closer.evaluate(() => window.__store);
+  await closer.close();
+  const after = await openPage(browser, port, 5, closedStore);
+  await after.waitForTimeout(800);
+  check(await after.locator('.sc-guide').count() === 0, 'closing the guide with ✕ also counts as seen');
+  await after.close();
 
   // 1. After the send of round 1: the agent's turn, a waiting footer, no Send button.
   await api('PUT', '/api/proposals', proposals(7, 1));
@@ -134,6 +143,9 @@ async function decideAndSend(page, key) {
   check(await within(page, () => /Posted 1 reply\. 1 not posted\./.test(document.querySelector('.sc-banner-done')?.textContent ?? '')), 'done says what was posted');
   check(await page.locator('.sc-banner-done a[href="https://github.com/acme/w/pull/7#discussion_r99"]').count() === 1, 'with a link to the posted reply');
   check((await text(page, '.sc-toggle')).includes('✓ done'), 'the pill says done');
+  const back = await openPage(browser, port, 7, await page.evaluate(() => window.__store));
+  check(await within(back, () => /Posted 1 reply\./.test(document.querySelector('.sc-banner-done')?.textContent ?? '')), 'opened again later, done still says what was posted');
+  await back.close();
 
   // 6. A resend after the agent already pushed the next round is refused, and the page moves on.
   await api('PUT', '/api/proposals', proposals(8, 1));
