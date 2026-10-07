@@ -139,6 +139,28 @@ async function decideAndSend(page, key) {
   check(/already sent/.test(asked), 'the second tab asks before it replaces sent decisions');
   check((await api('GET', '/api/decisions?repo=acme/w&pr=9&round=1&peek=1')).body.revision === 1, 'and a No sends nothing');
 
+  // 10. Review round 2: the review body and the submit choice in one block; GitHub's limits lock the send.
+  await api('PUT', '/api/proposals', { tool: 'second-chair', kind: 'proposals', mode: 'review', repo: 'acme/w', pr: 11, round: 2, head: 'h2', items: [
+    { thread_id: 'BODY', comment_id: null, verdict: 'post', reply_en: 'Two blocking points.', needs_submit: true, suggested_submit: 'REQUEST_CHANGES', context: 'The cache never evicts.' },
+    { thread_id: 'C1', comment_id: 11, path: 'a.js', line: 1, verdict: 'post', reply_en: 'Evict here.' },
+  ] });
+  const rv = await openPage(browser, port, 11);
+  await rv.waitForSelector('.sc-yourreview');
+  check(await rv.locator('.sc-yourreview .sc-card[data-sc-card=BODY]').count() === 1, 'the review body sits in the Your review block');
+  check(await rv.locator('.sc-row[data-sc-item=BODY]').count() === 0, 'and not in the file list');
+  check(await rv.locator('.sc-yourreview [data-sc-act=submit][data-sc-val=""].sc-on').count() === 1, 'Leave as draft is the default');
+  check(await rv.locator('.sc-yourreview [data-sc-act=submit][data-sc-val=REQUEST_CHANGES].sc-suggested').count() === 1, 'the agent suggestion is outlined, not chosen');
+  await rv.click('.sc-yourreview [data-sc-card=BODY] [data-sc-act=decide][data-sc-val=post]');
+  await rv.click(`${card('C1')} [data-sc-act=decide][data-sc-val=post]`);
+  check(await rv.isDisabled('[data-sc-act=export]'), 'a kept body that needs the submit locks Leave as draft');
+  check(/GitHub adds this body only with the submit/.test(await text(rv, '.sc-lock')), 'and the footer says why');
+  await rv.click('.sc-yourreview [data-sc-act=submit][data-sc-val=COMMENT]');
+  check(!(await rv.isDisabled('[data-sc-act=export]')) && await rv.locator('.sc-lock[hidden]').count() === 1, 'choosing Comment unlocks the send');
+  await rv.click('[data-sc-act=export]');
+  await rv.waitForSelector('.sc-wait');
+  check((await api('GET', '/api/decisions?repo=acme/w&pr=11&round=2&peek=1')).body.submit === 'COMMENT', 'the decisions carry the submit');
+  check(/Then it submits it as Comment/.test(await text(rv, '.sc-status')), 'the status says the agent will submit it');
+
   // 9. Polling pauses while the tab is hidden and resumes at once when it is visible.
   await tabA.evaluate(() => { const orig = window.__gmx; window.__calls = 0; window.__gmx = (r) => { window.__calls++; return orig(r); }; });
   await tabA.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); window.__calls = 0; });

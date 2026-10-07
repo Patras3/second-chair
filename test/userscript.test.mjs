@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -491,4 +491,74 @@ test('a reload of the same publication keeps what the page knows about its sends
   assert.equal(stateFor(payload({ published_at: 'p1' }), s).resendOf, 's0');
   const next = stateFor(payload({ published_at: 'p2' }), s);
   assert.deepEqual([next.lastExport, next.resendOf], [null, null]);
+});
+
+const review2 = (items) => stateFor(payload({ mode: 'review', round: 2, items }), null);
+const BODY = (over = {}) => ({ thread_id: 'BODY', comment_id: null, verdict: 'post', reply_en: 'Summary', ...over });
+const C1 = { thread_id: 'C1', comment_id: 1, path: 'a.js', line: 2, verdict: 'post', reply_en: 'c' };
+
+test('a body that needs the submit locks Leave as draft', () => {
+  const s = review2([BODY({ needs_submit: true }), C1]);
+  s.decisions.BODY.decision = 'post'; s.decisions.C1.decision = 'post';
+  assert.match(submitLock(s), /GitHub adds this body only with the submit/);
+  s.submit = 'COMMENT';
+  assert.equal(submitLock(s), null);
+  s.decisions.BODY.decision = 'drop'; s.submit = null;
+  assert.equal(submitLock(s), null);
+});
+
+test('Request changes needs a body, and Comment needs a body or a kept comment', () => {
+  const s = review2([BODY(), C1]);
+  s.decisions.BODY.decision = 'drop'; s.decisions.C1.decision = 'post'; s.submit = 'REQUEST_CHANGES';
+  assert.match(submitLock(s), /Request changes needs a review body/);
+  s.submit = 'COMMENT';
+  assert.equal(submitLock(s), null);
+  s.decisions.C1.decision = 'drop';
+  assert.match(submitLock(s), /Comment needs a review body or at least one kept comment/);
+  s.submit = 'APPROVE';
+  assert.equal(submitLock(s), null);
+  assert.equal(submitLock(stateFor(payload(), null)), null, 'respond mode has no submit');
+});
+
+test('the export carries the submit only in review round 2', () => {
+  const s = review2([BODY(), C1]);
+  s.decisions.BODY.decision = 'post'; s.decisions.C1.decision = 'post'; s.submit = 'APPROVE';
+  assert.equal(buildExport(s, 'now').submit, 'APPROVE');
+  s.submit = undefined;
+  assert.equal(buildExport(s, 'now').submit, null);
+  s.submit = 'COMMENT';
+  s.decisions.BODY.decision = 'post';
+  const locked = review2([BODY({ needs_submit: true }), C1]);
+  locked.decisions.BODY.decision = 'post'; locked.decisions.C1.decision = 'post';
+  assert.equal(buildExport(locked, 'now'), null, 'a locked send exports nothing');
+  const r1 = stateFor(payload(), null);
+  for (const it of r1.payload.items) r1.decisions[it.thread_id].decision = 'manual';
+  assert.equal('submit' in buildExport(r1, 'now'), false);
+});
+
+test('the submit choice survives a reload of the same round and resets on a new one', () => {
+  const s = review2([BODY(), C1]);
+  s.submit = 'COMMENT';
+  assert.equal(stateFor(s.payload, s).submit, 'COMMENT');
+  assert.equal(stateFor({ ...s.payload, round: 1 }, s).submit, null);
+});
+
+test('Your review holds the body card and, in round 2, the submit choice with the agent suggestion outlined', () => {
+  const s = review2([BODY({ suggested_submit: 'APPROVE' }), C1]);
+  const h = buildYourReview(s, {});
+  assert.match(h, /Your review/);
+  assert.match(h, /data-sc-card="BODY"/);
+  assert.match(h, /When the agent has applied this:/);
+  assert.match(h, /data-sc-act="submit" data-sc-val=""[^>]*>Leave as draft/);
+  assert.match(h, /class="sc-btn sc-on"[^>]*data-sc-act="submit" data-sc-val=""/, 'Leave as draft is chosen by default');
+  assert.match(h, /class="sc-btn sc-suggested"[^>]*data-sc-val="APPROVE"/);
+  s.submit = 'COMMENT';
+  assert.match(buildYourReview(s, {}), /class="sc-btn sc-on"[^>]*data-sc-val="COMMENT"/);
+  assert.doesNotMatch(buildYourReview(stateFor(payload({ mode: 'review', items: [BODY(), C1] }), null), {}), /When the agent has applied this/);
+});
+
+test('in review mode the body leaves the file list for the Your review block', () => {
+  const s = review2([BODY(), C1]);
+  assert.doesNotMatch(buildPanelList(s, null, 'all', () => ({})), /data-sc-item="BODY"/);
+  assert.match(buildPanelList(stateFor(payload(), null), null, 'all', () => ({})), /data-sc-item="G"/);
 });

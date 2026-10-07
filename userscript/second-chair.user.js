@@ -180,7 +180,8 @@ function stateFor(payload, previous) {
   // lastExport tells this tab's own send from another tab's; resendOf marks a round reopened by Edit and send again.
   const lastExport = samePublication ? previous.lastExport ?? null : null;
   const resendOf = samePublication ? previous.resendOf ?? null : null;
-  return { payload, decisions, sentAt, sentVia, doneAt, lastExport, resendOf };
+  const submit = sameRound ? previous.submit ?? null : null;
+  return { payload, decisions, sentAt, sentVia, doneAt, lastExport, resendOf, submit };
 }
 
 /** True when the user asked the agent for a new version of at least one item. */
@@ -341,10 +342,27 @@ function step(items, currentId, delta) {
   return items[(i + delta + items.length) % items.length].thread_id;
 }
 
-/** The export object, or null while a thread is still undecided. */
-function buildExport(state, now) {
-  if (!progress(state).complete) return null;
+/**
+ * Why the review's submit choice cannot go out as it stands, or null. GitHub adds a body to a pending review that
+ * has none only with the submit, needs a body for Request changes, and needs a body or a comment for Comment.
+ */
+function submitLock(state) {
   const p = state.payload;
+  if (modeOf(p) !== 'review' || p.round !== SC_FINAL_ROUND) return null;
+  const body = p.items.find((it) => it.thread_id === 'BODY');
+  const keptBody = Boolean(body) && effective(state, body).decision === 'post' && String(state.decisions.BODY?.reply ?? '').trim() !== '';
+  const keptComment = p.items.some((it) => it.comment_id != null && effective(state, it).decision === 'post');
+  if (keptBody && body.needs_submit && !state.submit) return 'GitHub adds this body only with the submit. Choose Comment, Approve or Request changes, or drop the body.';
+  if (state.submit === 'REQUEST_CHANGES' && !keptBody) return 'Request changes needs a review body. Keep the body, or choose another option.';
+  if (state.submit === 'COMMENT' && !keptBody && !keptComment) return 'Comment needs a review body or at least one kept comment.';
+  return null;
+}
+
+/** The export object, or null while a thread is still undecided or the submit choice cannot go out. */
+function buildExport(state, now) {
+  if (!progress(state).complete || submitLock(state)) return null;
+  const p = state.payload;
+  const submit = modeOf(p) === 'review' && p.round === SC_FINAL_ROUND ? { submit: state.submit ?? null } : {};
   return {
     tool: SC_TOOL,
     kind: 'decisions',
@@ -368,6 +386,7 @@ function buildExport(state, now) {
         note: d.note,
       };
     }),
+    ...submit,
   };
 }
 
@@ -486,9 +505,31 @@ function rowParts(state, it, v) {
   return { decided, icon, label };
 }
 
+/**
+ * Review mode's own block at the top of the list: the review body, and in round 2 what happens to the review once
+ * the agent applied the decisions. The agent may suggest an event; only the user picks one.
+ */
+function buildYourReview(state, view) {
+  const p = state.payload;
+  const body = p.items.find((it) => it.thread_id === 'BODY');
+  if (modeOf(p) !== 'review' || !body) return '';
+  let choice = '';
+  if (p.round === SC_FINAL_ROUND) {
+    const options = [{ key: '', label: 'Leave as draft', help: 'The agent updates your draft review. You submit it yourself on GitHub.' }, ...SC_EVENTS];
+    const buttons = options.map((o) => {
+      const on = (state.submit ?? '') === o.key;
+      const cls = on ? 'sc-btn sc-on' : !state.submit && body.suggested_submit === o.key ? 'sc-btn sc-suggested' : 'sc-btn';
+      return `<button type="button" class="${cls}" data-sc-act="submit" data-sc-val="${o.key}" title="${esc(o.help)}"${view.readOnly ? ' disabled' : ''}>${esc(o.label)}</button>`;
+    }).join('');
+    choice = `<div class="sc-submit"><div class="sc-caption">When the agent has applied this:</div><div class="sc-seg">${buttons}</div></div>`;
+  }
+  return `<div class="sc-yourreview"><div class="sc-group"><span>Your review</span></div><div class="sc-yourreview-body">${buildCard(state, body, 'panel', { ...view, expanded: true })}${choice}</div></div>`;
+}
+
 function buildPanelList(state, openId, filterKey, viewOf) {
   const p = state.payload;
-  const items = visibleItems(state, filterKey);
+  // In review mode the body has its own block above the list.
+  const items = visibleItems(state, filterKey).filter((it) => !(modeOf(p) === 'review' && it.thread_id === 'BODY'));
   return groupItems(items).map((g) => `<div class="sc-group"><span>${esc(g.label)}</span><span>${g.items.length}</span></div>${g.items.map((it) => {
     const e = effective(state, it);
     const v = viewOf(it);
@@ -550,6 +591,9 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-banner{margin:10px 14px 0;padding:8px 12px;border-radius:6px;background:var(--bgColor-success-muted,#dafbe1);border:1px solid var(--borderColor-success-muted,#4ac26b66)}
 .sc-banner-done{background:var(--bgColor-done-muted,#fbefff);border-color:var(--borderColor-done-muted,#c297ff66)}
 .sc-posted{margin:6px 0;padding-left:20px}
+.sc-yourreview-body{padding:10px 14px;border-bottom:1px solid var(--borderColor-default,#d0d7de)}
+.sc-submit{margin-top:4px}.sc-submit .sc-seg{flex-wrap:wrap}
+.sc-lock{margin-top:6px;font-size:12px;color:var(--fgColor-attention,#9a6700)}
 .sc-status{margin-top:8px;font-size:13px}.sc-status-warn{margin-top:4px;color:var(--fgColor-attention,#9a6700)}
 .sc-wait{display:flex;align-items:center;justify-content:center;gap:8px;height:32px;font-weight:600}
 .sc-spin{width:12px;height:12px;border:2px solid var(--borderColor-default,#d0d7de);border-top-color:var(--fgColor-accent,#0969da);border-radius:50%;animation:sc-spin 1s linear infinite}
@@ -772,12 +816,14 @@ function secondChairBootstrap() {
   ${state && !info ? '<hr><a href="#" data-sc-act="markdone">Mark as done</a>' : ''}
   ${state ? '<a href="#" class="sc-danger" data-sc-act="clear">Clear from this browser</a>' : ''}</div>` : '';
     const banner = info ? doneBanner(info) : '';
+    const body = state ? itemById('BODY') : null;
+    const lock = ph === 'decide' ? submitLock(state) : null;
     const msg = message ? `<div class="sc-msg${message.error ? ' sc-err' : ''}">${richText(message.text)}</div>` : '';
     const paste = !state || message?.showPaste ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
     const keys = state ? `<div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${decisionsFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div>` : '';
     let foot = '';
     if (ph === 'decide') {
-      foot = `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete ? '' : 'disabled'}>${sendLabel(pr)}</button>${keys}</div>`;
+      foot = `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete && !lock ? '' : 'disabled'}>${sendLabel(pr)}</button><div class="sc-lock"${lock ? '' : ' hidden'}>${esc(lock ?? '')}</div>${keys}</div>`;
     } else if (ph === 'waiting') {
       const what = state.payload.round < SC_FINAL_ROUND ? `Waiting for round ${state.payload.round + 1}` : `Waiting for the new round ${state.payload.round}`;
       foot = `<div class="sc-panel-foot"><div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>${what}</div><div class="sc-keys"><a href="#" data-sc-act="resend">Edit and send again</a></div></div>`;
@@ -786,7 +832,7 @@ function secondChairBootstrap() {
     } else if (ph === 'done') {
       foot = '<div class="sc-panel-foot sc-muted sc-small">Read only. A new proposal from the agent reopens this pull request.</div>';
     }
-    panel.innerHTML = `${head}${menu}${banner}${state ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${state ? buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
+    panel.innerHTML = `${head}${menu}${banner}${state ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${state ? buildYourReview(state, body ? viewOf(body) : {}) + buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
     panel.querySelector('.sc-list').scrollTop = scrollTop;
     applyLayout();
   }
@@ -799,8 +845,14 @@ function secondChairBootstrap() {
     toggle?.classList.toggle('sc-complete', pr.complete && !locked());
     const send = shellPanel()?.querySelector('[data-sc-act=export]');
     if (send) {
-      send.disabled = !(pr.complete && !locked());
+      const lock = submitLock(state);
+      send.disabled = !(pr.complete && !locked() && !lock);
       send.textContent = sendLabel(pr);
+      const why = shellPanel()?.querySelector('.sc-lock');
+      if (why) {
+        why.hidden = !lock;
+        why.textContent = lock ?? '';
+      }
     }
     const bar = (n) => `${pr.total ? (100 * n) / pr.total : 0}%`;
     const mine = shellPanel()?.querySelector('.sc-p-mine');
@@ -1152,6 +1204,11 @@ function secondChairBootstrap() {
       }
     } else if (act === 'export') {
       sendDecisions();
+    } else if (act === 'submit') {
+      if (!state || locked()) return;
+      state.submit = el.dataset.scVal || null;
+      save();
+      renderPanel();
     } else if (act === 'resend') {
       const when = formatTime(state.sentAt);
       const warning = live.pickedUpAt

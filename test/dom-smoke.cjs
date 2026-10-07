@@ -236,8 +236,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check((await rv.textContent(card('C1'))).includes('Comment to post'), 'a review comment card says Comment to post');
   await rv.click(`${card('C1')} [data-sc-val=revise]`);
   await rv.click('.sc-toggle');
-  await rv.click('.sc-row-main[data-sc-id=BODY]');
-  await rv.click(`${card('BODY', 'panel')} [data-sc-val=post]`);
+  await rv.click(`.sc-yourreview ${card('BODY', 'panel')} [data-sc-val=post]`);
   check(await rv.isDisabled('[data-sc-act=export]'), 'send stays locked while Revise has no note');
   check(await rv.locator(`${card('C1')} .sc-note.sc-note-needed`).count() === 1, 'the empty note is marked');
   await rv.click(`${card('C1')} .sc-note`);
