@@ -177,7 +177,10 @@ function stateFor(payload, previous) {
   const sentAt = samePublication ? previous.sentAt ?? null : null;
   const doneAt = samePublication ? previous.doneAt ?? null : null;
   const sentVia = samePublication && sentAt ? previous.sentVia ?? null : null;
-  return { payload, decisions, sentAt, sentVia, doneAt };
+  // lastExport tells this tab's own send from another tab's; resendOf marks a round reopened by Edit and send again.
+  const lastExport = samePublication ? previous.lastExport ?? null : null;
+  const resendOf = samePublication ? previous.resendOf ?? null : null;
+  return { payload, decisions, sentAt, sentVia, doneAt, lastExport, resendOf };
 }
 
 /** True when the user asked the agent for a new version of at least one item. */
@@ -242,7 +245,8 @@ function statusOf(state, phase, live = {}) {
     text = !round1 ? 'Agent\'s turn. It writes the new versions you asked for. Round 2 opens here again.'
       : review ? 'Agent\'s turn. It rewrites the comments you asked to revise. Round 2 opens here.'
         : 'Agent\'s turn. It makes the fixes and commits them, without pushing. Round 2 opens here.';
-    text += live.pickedUpAt ? ` The agent picked up your decisions at ${formatTime(live.pickedUpAt)}.` : ` Sent ${formatTime(state.sentAt)}.`;
+    if (state.sentVia === 'clipboard') text += ' Your decisions are on the clipboard. Paste them to the agent.';
+    else text += live.pickedUpAt ? ` The agent picked up your decisions at ${formatTime(live.pickedUpAt)}.` : ` Sent ${formatTime(state.sentAt)}.`;
   } else if (phase === 'publishing') {
     who = 'agent';
     const event = SC_EVENTS.find((e) => e.key === state.submit);
@@ -263,14 +267,6 @@ function formatTime(iso) {
 }
 
 const SC_DONE_REASON = { closed: 'closed', 'final-sent': 'final round sent', marked: 'marked as done' };
-
-/** The banner text for a round that was sent; it names the server only when the server took the decisions. */
-function sentNote(state) {
-  const when = `Decisions sent ${formatTime(state.sentAt)}.`;
-  if (state.sentVia === 'server') return `${when} The agent picks them up from the server; the next round loads here.`;
-  if (state.sentVia === 'clipboard') return `${when} They are on the clipboard. Paste them to the agent; the next round loads here.`;
-  return when;
-}
 
 /** True when the server holds a payload this state has not loaded: a later round, another head, a re-publish or a close. */
 function isNewer(serverPayload, state) {
@@ -553,6 +549,11 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-keys kbd{font:11px ui-monospace,monospace;border:1px solid var(--borderColor-default,#d0d7de);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--bgColor-default,#fff)}
 .sc-banner{margin:10px 14px 0;padding:8px 12px;border-radius:6px;background:var(--bgColor-success-muted,#dafbe1);border:1px solid var(--borderColor-success-muted,#4ac26b66)}
 .sc-banner-done{background:var(--bgColor-done-muted,#fbefff);border-color:var(--borderColor-done-muted,#c297ff66)}
+.sc-posted{margin:6px 0;padding-left:20px}
+.sc-status{margin-top:8px;font-size:13px}.sc-status-warn{margin-top:4px;color:var(--fgColor-attention,#9a6700)}
+.sc-wait{display:flex;align-items:center;justify-content:center;gap:8px;height:32px;font-weight:600}
+.sc-spin{width:12px;height:12px;border:2px solid var(--borderColor-default,#d0d7de);border-top-color:var(--fgColor-accent,#0969da);border-radius:50%;animation:sc-spin 1s linear infinite}
+@keyframes sc-spin{to{transform:rotate(360deg)}}
 .sc-msg{margin:10px 14px 0;font-size:12px}.sc-msg.sc-err{color:var(--fgColor-danger,#d1242f)}
 .sc-paste{margin:10px 14px;width:calc(100% - 28px);min-height:90px;font:12px ui-monospace,monospace}
 .sc-card,.sc-panel,.sc-toggle{--sc-accent:var(--fgColor-accent,#0969da);--sc-border:var(--borderColor-default,#d0d7de);--sc-subtle:var(--bgColor-muted,#f6f8fa);--sc-canvas:var(--bgColor-default,#fff);--sc-muted:var(--fgColor-muted,#59636e);--sc-success:var(--fgColor-success,#1a7f37)}
@@ -622,6 +623,10 @@ function secondChairBootstrap() {
   let menuOpen = false;
   let rendering = false;
   let timer = null;
+  let pollTimer = null;
+  // What polling learned about this round: when the agent picked the decisions up, and what publish recorded.
+  let live = { pickedUpAt: null, revision: null, published: null };
+  const POLL_MS = 5000;
   const expanded = new Set();
   const editing = new Set();
   const ui = (() => {
@@ -642,7 +647,9 @@ function secondChairBootstrap() {
     }
   };
   const save = () => GM_setValue(storageKey(loc.repo, loc.number), JSON.stringify(state));
-  const done = () => Boolean(doneInfo(state));
+  const phase = () => phaseOf(state);
+  // Only the user's turn takes decisions and edits.
+  const locked = () => phase() !== 'decide';
   let showDoneCards = false;
   const itemById = (id) => state.payload.items.find((x) => x.thread_id === id);
   const viewOf = (it) => ({
@@ -651,9 +658,9 @@ function secondChairBootstrap() {
     editing: editing.has(it.thread_id),
     hidden: Boolean(it.comment_id) && !anchorFor(it),
     position: `${displayOrder(state.payload.items).indexOf(it) + 1} of ${state.payload.items.length}`,
-    sent: Boolean(state.sentAt),
-    done: done(),
-    readOnly: done(),
+    sent: phase() === 'waiting',
+    done: phase() === 'publishing' || phase() === 'done',
+    readOnly: locked(),
   });
 
   /** Resolves { status, body } from the local server; rejects when it is not running. */
@@ -723,39 +730,62 @@ function secondChairBootstrap() {
     document.documentElement.classList.toggle('sc-shift-wide', ui.open && ui.wide);
   }
 
+  const sendLabel = (pr) => `${state.resendOf ? 'Send again' : 'Send decisions'}${pr.complete ? '' : ` · ${pr.total - pr.done} left`}`;
+
+  /** The done banner: what reached GitHub, with links, and the switch for the cards. */
+  function doneBanner(info) {
+    const st = statusOf(state, 'done', live);
+    const links = Object.entries(live.published?.items ?? {}).filter(([, x]) => x.url).map(([id, x]) => {
+      const it = itemById(id);
+      return `<li><a href="${esc(x.url)}">${richText(field(it ?? {}, 'summary') || id)}</a></li>`;
+    }).join('');
+    return `<div class="sc-banner sc-banner-done"><b>Done</b> · ${esc(SC_DONE_REASON[info.reason])} ${esc(formatTime(info.at))}. ${esc(st.text)}${links ? `<ul class="sc-posted">${links}</ul>` : ''}
+  <div class="sc-small">Cards are hidden on the page. <a href="#" data-sc-act="showdone">${showDoneCards ? 'Hide cards' : 'Show cards on the page'}</a></div></div>`;
+  }
+
   function renderPanel() {
     const panel = shellPanel();
     const toggle = shellToggle();
     if (!panel || !toggle) return;
     const listEl = panel.querySelector('.sc-list');
     const scrollTop = listEl ? listEl.scrollTop : 0;
+    const ph = phase();
     const info = doneInfo(state);
     const pr = state ? progress(state) : null;
-    toggle.innerHTML = `${SC_LOGO} ${info ? '✓ done' : pr ? `${pr.done}/${pr.total}` : ''}`;
-    toggle.classList.toggle('sc-complete', Boolean(pr && pr.complete && !info));
+    toggle.innerHTML = `${SC_LOGO} ${{ empty: '–', decide: pr ? `${pr.done}/${pr.total}` : '', waiting: 'waiting', publishing: 'publishing', done: '✓ done' }[ph]}`;
+    toggle.classList.toggle('sc-complete', Boolean(ph === 'decide' && pr.complete));
     const pct = (n) => (pr && pr.total ? (100 * n) / pr.total : 0);
+    const st = state && ph !== 'done' ? statusOf(state, ph, live) : null;
+    const status = st ? `<div class="sc-status sc-status-${st.who}">${richText(st.text).replace(/^(Your turn\.|Agent&#39;s turn\.)/, '<b>$1</b>')}</div>${st.warn ? `<div class="sc-status sc-status-warn">${esc(st.warn)}</div>` : ''}` : '';
     const head = `<div class="sc-panel-head">
   <div class="sc-hrow">${SC_LOGO}<b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${modeOf(state.payload)} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
     ${info ? '<span class="sc-label sc-done-label">✓ Done</span>' : ''}
     <span class="sc-dot ${serverUp ? 'sc-up' : serverUp === false ? 'sc-down' : ''}" title="server ${serverUp ? 'on' : 'off'} · ${SC_SERVER}"></span>
     <button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
-  ${pr && !info ? `<div class="sc-progress"><i style="width:${pct(pr.done - pr.auto)}%" class="sc-p-mine"></i><i style="width:${pct(pr.auto)}%" class="sc-p-auto"></i></div>
+  ${ph === 'decide' ? `<div class="sc-progress"><i style="width:${pct(pr.done - pr.auto)}%" class="sc-p-mine"></i><i style="width:${pct(pr.auto)}%" class="sc-p-auto"></i></div>
   <div class="sc-hrow sc-muted sc-small"><span><b class="sc-fg sc-n-done">${pr.done}</b> of ${pr.total} decided</span>${pr.auto ? `<span>· ${pr.auto} auto</span>` : ''}<span class="sc-grow"></span><span class="sc-left">${pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send'}</span></div>` : ''}
+  ${status}
 </div>`;
     const menu = menuOpen ? `<div class="sc-menu">
   <a href="#" data-sc-act="fetch">Load from server</a><a href="#" data-sc-act="import">Load from clipboard</a><hr>
   <a href="#" data-sc-act="wide">${ui.wide ? 'Narrow panel' : 'Half screen'}</a>
   ${state && !info ? '<hr><a href="#" data-sc-act="markdone">Mark as done</a>' : ''}
   ${state ? '<a href="#" class="sc-danger" data-sc-act="clear">Clear from this browser</a>' : ''}</div>` : '';
-    let banner = '';
-    if (info) banner = `<div class="sc-banner sc-banner-done"><b>Done</b> · ${esc(SC_DONE_REASON[info.reason])} ${esc(formatTime(info.at))}. Cards are hidden on the page. <a href="#" data-sc-act="showdone">${showDoneCards ? 'Hide cards' : 'Show cards on the page'}</a></div>`;
-    else if (state?.sentAt) banner = `<div class="sc-banner">${esc(sentNote(state))}</div>`;
+    const banner = info ? doneBanner(info) : '';
     const msg = message ? `<div class="sc-msg${message.error ? ' sc-err' : ''}">${richText(message.text)}</div>` : '';
     const paste = !state || message?.showPaste ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
-    const foot = state && !info
-      ? `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete ? '' : 'disabled'}>Send decisions${pr.complete ? '' : ` · ${pr.total - pr.done} left`}</button>
-  <div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${decisionsFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div></div>`
-      : state ? '<div class="sc-panel-foot sc-muted sc-small">Read only. A new proposal from the agent reopens this pull request.</div>' : '';
+    const keys = state ? `<div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${decisionsFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div>` : '';
+    let foot = '';
+    if (ph === 'decide') {
+      foot = `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete ? '' : 'disabled'}>${sendLabel(pr)}</button>${keys}</div>`;
+    } else if (ph === 'waiting') {
+      const what = state.payload.round < SC_FINAL_ROUND ? `Waiting for round ${state.payload.round + 1}` : `Waiting for the new round ${state.payload.round}`;
+      foot = `<div class="sc-panel-foot"><div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>${what}</div><div class="sc-keys"><a href="#" data-sc-act="resend">Edit and send again</a></div></div>`;
+    } else if (ph === 'publishing') {
+      foot = '<div class="sc-panel-foot"><div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>The agent is publishing</div></div>';
+    } else if (ph === 'done') {
+      foot = '<div class="sc-panel-foot sc-muted sc-small">Read only. A new proposal from the agent reopens this pull request.</div>';
+    }
     panel.innerHTML = `${head}${menu}${banner}${state ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${state ? buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
     panel.querySelector('.sc-list').scrollTop = scrollTop;
     applyLayout();
@@ -765,12 +795,12 @@ function secondChairBootstrap() {
   function updateProgress(id) {
     const pr = progress(state);
     const toggle = shellToggle();
-    if (toggle && !done()) toggle.innerHTML = `${SC_LOGO} ${pr.done}/${pr.total}`;
-    toggle?.classList.toggle('sc-complete', pr.complete && !done());
+    if (toggle && !locked()) toggle.innerHTML = `${SC_LOGO} ${pr.done}/${pr.total}`;
+    toggle?.classList.toggle('sc-complete', pr.complete && !locked());
     const send = shellPanel()?.querySelector('[data-sc-act=export]');
     if (send) {
-      send.disabled = !(pr.complete && !done());
-      send.textContent = pr.complete ? 'Send decisions' : `Send decisions · ${pr.total - pr.done} left`;
+      send.disabled = !(pr.complete && !locked());
+      send.textContent = sendLabel(pr);
     }
     const bar = (n) => `${pr.total ? (100 * n) / pr.total : 0}%`;
     const mine = shellPanel()?.querySelector('.sc-p-mine');
@@ -806,7 +836,8 @@ function secondChairBootstrap() {
   }
 
   const inlineCard = (id) => document.querySelector(`.sc-card[data-sc-where=inline][data-sc-card="${CSS.escape(id)}"]`);
-  const showInline = () => Boolean(state) && (!done() || showDoneCards);
+  // The cards leave the page once the final round is sent, so they never sit next to the posted replies.
+  const showInline = () => Boolean(state) && (phase() === 'decide' || phase() === 'waiting' || showDoneCards);
 
   function cardElement(it) {
     const holder = document.createElement('div');
@@ -839,6 +870,7 @@ function secondChairBootstrap() {
       renderPanel();
       if (rebuild) rebuildInline();
       else renderInline();
+      schedulePoll();
     } finally {
       setTimeout(() => { rendering = false; }, 0);
     }
@@ -862,11 +894,19 @@ function secondChairBootstrap() {
     } else if (res.payload.repo !== loc.repo || res.payload.pr !== loc.number) {
       message = { error: true, text: `These proposals are for ${res.payload.repo}#${res.payload.pr}, and this page is ${loc.repo}#${loc.number}.`, showPaste: true };
     } else {
-      const wasDone = done();
+      const before = state ? { round: state.payload.round, published: state.payload.published_at ?? null, phase: phase() } : null;
       state = stateFor(res.payload, state);
       save();
-      if (done() && !wasDone) showDoneCards = false;
-      message = { text: done() ? 'This triage is done.' : `Loaded ${res.payload.items.length} ${modeOf(res.payload) === 'review' ? 'review comments' : 'threads'}, round ${res.payload.round}, from the ${source}.` };
+      const ph = phase();
+      if (ph === 'done' && before?.phase !== 'done') showDoneCards = false;
+      const newRound = before && before.published !== (res.payload.published_at ?? null);
+      if (ph === 'done') message = before?.phase === 'publishing' ? null : { text: 'This work is done.' };
+      else if (newRound && source === 'server' && before.phase !== 'decide') {
+        // The agent's next round arrived while the user waited: say so, and show it.
+        message = { text: res.payload.round === before.round ? `A new round ${res.payload.round} is here.` : `Round ${res.payload.round} is here.` };
+        ui.open = true;
+      } else message = { text: `Loaded ${res.payload.items.length} ${modeOf(res.payload) === 'review' ? 'review comments' : 'threads'}, round ${res.payload.round}, from the ${source}.` };
+      live = { pickedUpAt: null, revision: null, published: newRound ? null : live.published };
     }
     renderAll(true);
   }
@@ -886,20 +926,81 @@ function secondChairBootstrap() {
       if (force) message = { error: true, text: `The server at ${SC_SERVER} is not running. Start it with \`second-chair start\`, or load from the clipboard.`, showPaste: true };
     }
     renderPanel();
+    schedulePoll();
   }
+
+  const roundQuery = () => `repo=${encodeURIComponent(loc.repo)}&pr=${loc.number}&round=${state.payload.round}`;
+
+  /** While the agent works, asks the server every few seconds: a new round, the pick-up, what publish posted. */
+  // Idempotent: the page renders on every change GitHub makes, and each render must not restart the wait.
+  function schedulePoll() {
+    const ph = phase();
+    if (pollTimer || !loc || (ph !== 'waiting' && ph !== 'publishing') || document.visibilityState !== 'visible') return;
+    pollTimer = setTimeout(() => { pollTimer = null; poll(); }, POLL_MS);
+  }
+
+  function stopPoll() {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  async function poll() {
+    stopPoll();
+    const here = loc;
+    if (!here || !state) return;
+    try {
+      await sync(false);
+      if (here !== loc || !state) return;
+      const ph = phase();
+      if (ph === 'waiting' && state.sentVia === 'server') {
+        const d = await api('GET', `/api/decisions?${roundQuery()}&peek=1`);
+        live.pickedUpAt = d.status === 200 ? d.body?.picked_up_at ?? null : null;
+        live.revision = d.status === 200 ? d.body?.revision ?? 1 : null;
+      }
+      if (ph === 'publishing' || ph === 'done') {
+        const p = await api('GET', `/api/published?${roundQuery()}`);
+        if (p.status === 200) live.published = p.body;
+      }
+      if (here === loc) renderPanel();
+    } catch {
+      serverUp = false;
+      renderPanel();
+    } finally {
+      schedulePoll();
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') poll();
+    else stopPoll();
+  });
 
   async function sendDecisions() {
     const out = buildExport(state, new Date().toISOString());
     if (!out) return;
     try {
+      // Another tab, or this page before a reload, may have sent this round already. Ask before replacing it.
+      const prior = await api('GET', `/api/decisions?${roundQuery()}&peek=1`);
+      if (prior.status === 200 && !state.resendOf && (prior.body?.exported_at ?? null) !== state.lastExport
+        && (prior.body?.received_at ?? '') >= (state.payload.published_at ?? '')
+        && !confirm(`Decisions for this round were already sent ${formatTime(prior.body.received_at)}, maybe from another tab. Replace them?`)) return;
       const r = await api('POST', '/api/decisions', out);
       serverUp = true;
       if (r.status === 200) {
-        state.sentAt = out.exported_at;
-        state.sentVia = 'server';
+        Object.assign(state, { sentAt: out.exported_at, sentVia: 'server', lastExport: out.exported_at, resendOf: null });
+        live = { ...live, pickedUpAt: null, revision: r.body?.revision ?? null };
         save();
         message = null;
         renderAll(true);
+        return;
+      }
+      if (r.status === 409 && /already sent round/.test(r.body?.error ?? '')) {
+        // The agent moved on while the user edited. The old round is gone, so load the new one.
+        state.resendOf = null;
+        save();
+        await sync(true);
+        message = { error: true, text: `${r.body.error[0].toUpperCase()}${r.body.error.slice(1)}. Your changes were not sent.` };
+        renderPanel();
         return;
       }
       GM_setClipboard(JSON.stringify(out, null, 2), 'text');
@@ -907,8 +1008,7 @@ function secondChairBootstrap() {
     } catch {
       serverUp = false;
       // An offline final send also ends the triage.
-      state.sentAt = out.exported_at;
-      state.sentVia = 'clipboard';
+      Object.assign(state, { sentAt: out.exported_at, sentVia: 'clipboard', lastExport: out.exported_at, resendOf: null });
       save();
       GM_setClipboard(JSON.stringify(out, null, 2), 'text');
       message = { text: 'The server is not running, so the decisions are on the clipboard. Paste them to the agent.' };
@@ -1052,6 +1152,16 @@ function secondChairBootstrap() {
       }
     } else if (act === 'export') {
       sendDecisions();
+    } else if (act === 'resend') {
+      const when = formatTime(state.sentAt);
+      const warning = live.pickedUpAt
+        ? `The agent picked up your decisions at ${formatTime(live.pickedUpAt)} and may already be working on them. A new send replaces them. The agent sees the change before it can show you the next round, and redoes what changed.`
+        : `A new send replaces the decisions you sent at ${when}.`;
+      if (!confirm(warning)) return;
+      Object.assign(state, { resendOf: state.sentAt, sentAt: null, sentVia: null });
+      save();
+      stopPoll();
+      renderAll(true);
     } else if (act === 'clear') {
       if (!confirm('Remove the proposals and decisions for this PR from this browser?')) return;
       GM_deleteValue(storageKey(loc.repo, loc.number));
@@ -1086,7 +1196,7 @@ function secondChairBootstrap() {
     } else if (act === 'decide') {
       const d = state?.decisions[id];
       const key = el.dataset.scVal;
-      if (!d || done() || !decisionsFor(state.payload).some((b) => b.key === key)) return;
+      if (!d || locked() || !decisionsFor(state.payload).some((b) => b.key === key)) return;
       d.decision = d.decision === key ? null : key;
       save();
       refreshThread(id);
@@ -1118,12 +1228,12 @@ function secondChairBootstrap() {
       refreshThread(openId);
     } else if (openId && /^[1-9]$/.test(e.key)) {
       const b = decisionsFor(state.payload)[Number(e.key) - 1];
-      if (!b || done()) return;
+      if (!b || locked()) return;
       const d = state.decisions[openId];
       d.decision = d.decision === b.key ? null : b.key;
       save();
       refreshThread(openId);
-    } else if (openId && e.key === 'e' && !done()) {
+    } else if (openId && e.key === 'e' && !locked()) {
       editing.add(openId);
       expanded.add(openId);
       refreshThread(openId);
@@ -1141,7 +1251,7 @@ function secondChairBootstrap() {
       return;
     }
     const name = el.dataset.scField;
-    if (!name || !state || done()) return;
+    if (!name || !state || locked()) return;
     const id = el.dataset.scId;
     const d = state.decisions[id];
     if (!d) return;
@@ -1181,6 +1291,8 @@ function secondChairBootstrap() {
       state = load();
       openId = null;
       message = null;
+      live = { pickedUpAt: null, revision: null, published: null };
+      stopPoll();
       showDoneCards = false;
       expanded.clear();
       editing.clear();

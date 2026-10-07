@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'sentNote', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, sentNote, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -379,10 +379,6 @@ test('the done banner cannot say who closed it, and the sent note fits both ways
   const s = stateFor(payload(), null);
   s.sentAt = 'T';
   s.sentVia = 'server';
-  assert.match(sentNote(s), /^Decisions sent .*\. The agent picks them up from the server/);
-  s.sentVia = 'clipboard';
-  assert.ok(!/server/.test(sentNote(s)));
-  assert.match(sentNote(s), /clipboard/);
   assert.equal(stateFor(payload({ published_at: 'x' }), s).sentVia ?? null, null);
 });
 
@@ -476,4 +472,23 @@ test('a reply the agent rewrote clears the old decision and its note', () => {
   p.items[0] = { ...p.items[0], reply_en: 'Done.' };
   const next = stateFor(p, s);
   assert.deepEqual([next.decisions.T1.decision, next.decisions.T1.note], [null, '']);
+});
+
+test('a send through the clipboard tells the user to paste it to the agent', () => {
+  const s = decideAll(at(1), 'reply');
+  s.sentAt = '2026-10-07T08:09:00Z'; s.sentVia = 'clipboard';
+  assert.match(statusOf(s, 'waiting').text, /on the clipboard\. Paste them to the agent\./);
+  s.sentVia = 'server';
+  assert.doesNotMatch(statusOf(s, 'waiting').text, /clipboard/);
+});
+
+test('a reload of the same publication keeps what the page knows about its sends', () => {
+  const s = stateFor(payload({ published_at: 'p1' }), null);
+  Object.assign(s, { sentAt: 's', sentVia: 'server', lastExport: 'e1', resendOf: null });
+  const same = stateFor(payload({ published_at: 'p1', closed_at: 'c' }), s);
+  assert.equal(same.lastExport, 'e1');
+  s.resendOf = 's0';
+  assert.equal(stateFor(payload({ published_at: 'p1' }), s).resendOf, 's0');
+  const next = stateFor(payload({ published_at: 'p2' }), s);
+  assert.deepEqual([next.lastExport, next.resendOf], [null, null]);
 });

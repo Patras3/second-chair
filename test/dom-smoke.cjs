@@ -155,8 +155,8 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check(!(await page.isDisabled('[data-sc-act=export]')), 'send unlocks at 6/6');
 
   await page.click('[data-sc-act=export]');
-  await page.waitForSelector('.sc-banner');
-  check(/Decisions sent .*picks them up from the server/.test(await page.textContent('.sc-banner')), 'the sent banner names the server when it took the decisions');
+  await page.waitForSelector('.sc-wait');
+  check(/^Agent's turn\..* Sent /.test(await page.textContent('.sc-status')) && !/clipboard/.test(await page.textContent('.sc-status')), 'after a send to the server, the status says the agent works on it');
   const got = await api('GET', '/api/decisions?repo=acme/w&pr=7&round=1');
   const out = got.status === 200 ? JSON.parse(got.responseText) : { decisions: [] };
   const by = Object.fromEntries(out.decisions.map((d) => [d.thread_id, d]));
@@ -181,9 +181,17 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
     await page.keyboard.press('1');
   }
   await page.click('[data-sc-act=export]');
-  await page.waitForSelector('.sc-banner-done');
-  check((await page.textContent('.sc-toggle')).includes('✓ done'), 'the pill reads done after the final send');
+  await page.waitForSelector('.sc-wait');
+  check((await page.textContent('.sc-toggle')).includes('publishing'), 'the pill reads publishing after the final send');
   check(await page.locator('.sc-card[data-sc-where=inline]').count() === 0, 'after the final send no card stays on the page');
+  const publishingStored = await page.evaluate(() => JSON.stringify(window.__store));
+  const offlinePublishing = await openPage(browser, 0, publishingStored);
+  await offlinePublishing.waitForTimeout(500);
+  check(await offlinePublishing.locator('.sc-card[data-sc-where=inline]').count() === 0, 'a reload with the server down keeps the cards hidden while the agent publishes');
+  await offlinePublishing.close();
+  await api('POST', '/api/close', { repo: 'acme/w', pr: 7 });
+  await page.waitForSelector('.sc-banner-done', { timeout: 9000 });
+  check((await page.textContent('.sc-toggle')).includes('✓ done'), 'the pill reads done once the agent closed');
   check(await page.locator('[data-sc-act=export], [data-sc-act=markdone]').count() === 0, 'a finished triage has no Send and no Mark as done');
   const finalStored = await page.evaluate(() => JSON.stringify(window.__store));
   const reopened = await openPage(browser, 0, finalStored);
@@ -195,7 +203,6 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await reopened.click(`${card('T1')} [data-sc-act=expand]`);
   check(await reopened.locator(`${card('T1')} [data-sc-act=decide]`).count() === 0 && await reopened.locator(`${card('T1')} [data-sc-field=note]`).count() === 0, 'an expanded card of a finished triage is read only');
 
-  await api('POST', '/api/close', { repo: 'acme/w', pr: 7 });
   const page2 = await openPage(browser, port, storedR1);
   await page2.waitForFunction(() => document.querySelector('.sc-toggle').textContent.includes('done'));
   check(await page2.locator('.sc-card[data-sc-where=inline]').count() === 0, 'a closed triage shows no cards on the page');
@@ -212,9 +219,9 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await offline.click('[data-sc-act=export]');
   await offline.waitForFunction(() => window.__clip);
   check(JSON.parse(await offline.evaluate(() => window.__clip)).decisions.length === 6, 'an offline send puts the decisions on the clipboard');
-  await offline.waitForSelector('.sc-banner');
-  const offBanner = await offline.textContent('.sc-banner');
-  check(/clipboard/.test(offBanner) && !/server/.test(offBanner), 'the offline sent banner talks about the clipboard, not the server');
+  await offline.waitForSelector('.sc-status');
+  const offStatus = await offline.textContent('.sc-status');
+  check(/Paste them to the agent/.test(offStatus) && !/picked up/.test(offStatus), 'the offline status says to paste the decisions to the agent');
 
   // Review mode: the comments of a pending review on someone else's PR, decided Post, Revise or Drop.
   await api('PUT', '/api/proposals', {
@@ -241,7 +248,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check(await rv.evaluate(() => document.activeElement?.classList.contains('sc-note')), 'and the note keeps the focus');
   check(await rv.locator(`${card('C1')} .sc-note.sc-note-needed`).count() === 0, 'the mark goes away');
   await rv.click('[data-sc-act=export]');
-  await rv.waitForSelector('.sc-banner');
+  await rv.waitForSelector('.sc-wait');
   const rgot = await api('GET', '/api/decisions?repo=acme/w&pr=8&round=1');
   const rout = rgot.status === 200 ? JSON.parse(rgot.responseText) : { decisions: [] };
   check(rout.mode === 'review' && rout.decisions.find((d) => d.thread_id === 'C1')?.note === 'say it shorter', 'the review decisions reach the server with the note');
@@ -269,7 +276,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await fk.click(`${card('F1')} [data-sc-val=fix]`);
   check(!(await fk.isDisabled('body > .sc-panel [data-sc-act=export]')), 'a decision unlocks Send decisions in the real panel');
   await fk.click('body > .sc-panel [data-sc-act=export]');
-  await fk.waitForSelector('body > .sc-panel .sc-banner');
+  await fk.waitForSelector('body > .sc-panel .sc-wait');
   const fgot = await api('GET', '/api/decisions?repo=acme/w&pr=9&round=1');
   check(fgot.status === 200 && JSON.parse(fgot.responseText).decisions.find((d) => d.thread_id === 'F1')?.decision === 'fix', 'Send decisions reaches the server');
 
