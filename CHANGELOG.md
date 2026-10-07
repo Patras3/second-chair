@@ -1,8 +1,12 @@
 # Changelog
 
-## 1.1.3
+## 1.1.4
 
 Not released yet: no tag and no GitHub Release.
+
+- The review tour says what the main comment is and when you choose **Approve**, **Comment** or **Request changes**: in round 2, after you decided each comment.
+
+## 1.1.3
 
 - The tour asks before it starts: **Show me** or **Not now**. A user who has seen no tour yet gets a short welcome that says what Second Chair does on this screen.
 - The tour now shows the yellow **For you** box in review mode too, and the note for the agent in every tour, with an example.

@@ -238,7 +238,7 @@ async function decideAndSend(page, key) {
   const fresh = await openPage(browser, port, 11, {});
   await fresh.waitForSelector('.sc-tour .sc-tour-tip');
   await fresh.click('[data-sc-act=tournext]');
-  check(/1 of 4/.test(await text(fresh, '.sc-tour-tip')) && /leave it as a draft, or let the agent submit it/.test(await text(fresh, '.sc-tour-tip')), 'review round 2 has its own tour, on the submit choice');
+  check(/1 of 4/.test(await text(fresh, '.sc-tour-tip')) && /Approve, Comment or Request changes/.test(await text(fresh, '.sc-tour-tip')), 'review round 2 has its own tour, on the submit choice');
   await fresh.close();
 
   // 10b. A review body taller than the panel: the tour lights its top, in view, and points at it.

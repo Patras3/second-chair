@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Second Chair
 // @namespace    https://github.com/Patras3/second-chair
-// @version      1.1.3
+// @version      1.1.4
 // @icon         data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%20fill=%22none%22%20stroke=%22%231f2328%22%20stroke-width=%221.5%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22%3E%3Cpath%20d=%22M5.75%201.75%205.25%209.25M3.75%209.25h8.5M5.25%209.25l-1%205M11%209.25l1%205%22/%3E%3C/svg%3E
 // @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*
@@ -597,12 +597,12 @@ const SC_TOURS = {
     { at: 'card', sel: '.sc-reply-box', text: 'The comment as it stands. Click it to change the words.' },
     { at: 'card', sel: '.sc-seg', text: 'Keep it, ask the agent to revise it, or drop it from the review.' },
     { at: 'card', sel: '.sc-note', text: 'A note tells the agent what to change, and is never posted. For example: "Shorter, and link the docs page."' },
-    { at: 'panel', sel: '.sc-yourreview', text: 'The main comment of your review. You decide it like the others.' },
+    { at: 'panel', sel: '.sc-yourreview', text: 'The main comment sits at the top of your review, above the line comments. Approve or Request changes comes in round 2.' },
     { at: 'panel', sel: '.sc-status-warn', text: "Do not press GitHub's Submit button yet. It would publish every comment, decided or not." },
-    { at: 'panel', sel: '[data-sc-act=export]', text: 'Send when every comment is decided. The agent rewrites them, and round 2 comes back here.' },
+    { at: 'panel', sel: '[data-sc-act=export]', text: 'Send when every comment is decided. In round 2 you approve the final texts and choose Approve, Comment or Request changes.' },
   ],
   'review:2': [
-    { at: 'panel', sel: '.sc-submit', text: 'Choose what happens to the review: leave it as a draft, or let the agent submit it.' },
+    { at: 'panel', sel: '.sc-submit', text: 'Choose how the agent submits the review: Approve, Comment or Request changes. Leave as draft submits nothing.' },
     { at: 'panel', sel: '.sc-yourreview .sc-card', text: 'The main comment goes out with the review. Revise asks the agent for a new version.' },
     { at: 'card', sel: '.sc-note', text: 'With Revise, say what to change. For example: "Softer, this is only a nit."' },
     { at: 'panel', sel: '[data-sc-act=export]', text: 'Send, and the agent updates your review on GitHub.' },
@@ -612,7 +612,7 @@ const SC_TOURS = {
 const SC_TOUR_INTROS = {
   'reply:1': { title: 'Replying to a review', text: 'The agent read the review threads on this pull request and wrote a proposal for each one. Nothing is posted until you decide.' },
   'reply:2': { title: 'Round 2', text: 'The agent did what you decided. Now you choose which replies get posted.' },
-  'review:1': { title: 'Reviewing a pull request', text: 'The agent wrote a review of this pull request. It is a draft on GitHub that only you can see, and you decide each comment.' },
+  'review:1': { title: 'Reviewing a pull request', text: 'The agent wrote a review of this pull request. It is a draft on GitHub that only you can see. There are two rounds: first you decide each comment, then you approve the final texts and choose Approve, Comment or Request changes.' },
   'review:2': { title: 'Round 2', text: 'The agent rewrote the comments you sent back. Now you choose what goes into the review, and how it is submitted.' },
 };
 function tourIntro(mode, round, firstEver) {

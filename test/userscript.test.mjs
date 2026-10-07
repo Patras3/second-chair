@@ -638,6 +638,15 @@ test('every tour shows the yellow box and a note for the agent with an example',
   }
 });
 
+test('the review tour says when Approve or Request changes comes, and what the main comment is', () => {
+  assert.match(tourIntro('review', 1, false).text, /two rounds/);
+  const body = tourSteps('review', 1).find((st) => st.sel === '.sc-yourreview');
+  assert.match(body.text, /top of your review/);
+  assert.match(body.text, /round 2/);
+  assert.match(tourSteps('review', 1).at(-1).text, /Approve, Comment or Request changes/);
+  assert.match(tourSteps('review', 2).find((st) => st.sel === '.sc-submit').text, /Approve, Comment or Request changes/);
+});
+
 test('the tour first asks whether to start, and welcomes a first-time user', () => {
   assert.match(tourIntro('reply', 1, true).title, /Welcome to Second Chair/);
   assert.doesNotMatch(tourIntro('reply', 1, false).title, /Welcome/);
