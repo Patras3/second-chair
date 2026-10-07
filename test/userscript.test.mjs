@@ -633,3 +633,27 @@ test('the empty panel says how to start', () => {
   assert.match(down, /second-chair start/);
   assert.match(down, /sc-paste/);
 });
+
+test('rows show the file and line, not general, when an item has no author', () => {
+  const s = stateFor(payload({ mode: 'review', items: [{ thread_id: 'C1', comment_id: 1, path: 'src/a.js', line: 11, verdict: 'post', reply_en: 'x' }] }), null);
+  const html = buildPanelList(s, null, 'all', () => ({}));
+  assert.doesNotMatch(html, /general/);
+  assert.match(html, /class="sc-row-meta">line 11/);
+  assert.match(buildPanelList(stateFor(payload(), null), null, 'all', () => ({})), /class="sc-row-meta">general/, 'a general item still says so');
+});
+
+test('the mode names follow the commands, and commits show short', () => {
+  assert.deepEqual(SC_MODE_NAME, { reply: 'Respond', review: 'Review' });
+  const p = payload({ round: 2 });
+  p.items[0] = { ...p.items[0], verdict: 'publish', commits: ['854a392a366d20777f0dae5f670d56b215cbd19e'] };
+  const s = stateFor(p, null);
+  assert.match(buildPanelList(s, null, 'all', () => ({})), /commit <code title="854a392a366d20777f0dae5f670d56b215cbd19e">854a392<\/code>/);
+  assert.match(buildCard(s, s.payload.items[0], 'inline', { expanded: true }), /Commits: <code title="854a392a[0-9a-f]+">854a392<\/code>/);
+});
+
+test('a card from an earlier pass says so and folds the earlier text', () => {
+  const s = stateFor(payload({ mode: 'review', items: [{ thread_id: 'C1', comment_id: 1, path: 'a', line: 1, verdict: 'post', origin: 'earlier', original_en: 'old', reply_en: 'new' }] }), null);
+  const h = buildCard(s, s.payload.items[0], 'inline', { expanded: true });
+  assert.match(h, /<b>Second Chair<\/b> <span class="sc-muted">earlier pass<\/span>/);
+  assert.match(h, /<summary>Earlier text<\/summary>/);
+});

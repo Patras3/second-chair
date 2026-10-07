@@ -411,6 +411,11 @@ function decisionLabel(payload, key) {
   return decisionsFor(payload).find((b) => b.key === key)?.label ?? key;
 }
 
+/** A commit as GitHub shows it: seven characters, the full hash on hover. */
+function shortCommit(c) {
+  return `<code title="${esc(c)}">${esc(String(c).slice(0, 7))}</code>`;
+}
+
 /**
  * One thread's card. `where` is 'inline' (under the GitHub thread) or 'panel'. `view` carries what the page
  * remembers per thread: { expanded, editing, hidden } plus `sent`/`done`/`readOnly` for the whole round.
@@ -423,7 +428,8 @@ function buildCard(state, item, where, view = {}) {
   const review = modeOf(p) === 'review';
   const compact = !view.expanded && (e.auto || view.sent || view.done);
   const verdictLabel = item.verdict ? `<span class="sc-label sc-v-${esc(item.verdict)}">${esc(decisionLabel(p, item.verdict))}</span>` : '';
-  const who = item.origin === 'user' ? '<b>Your draft comment</b>' : `<b>Second Chair</b> <span class="sc-muted">${review ? 'draft comment' : 'proposes'}</span>`;
+  const who = item.origin === 'user' ? '<b>Your draft comment</b>'
+    : `<b>Second Chair</b> <span class="sc-muted">${item.origin === 'earlier' ? 'earlier pass' : review ? 'draft comment' : 'proposes'}</span>`;
   const links = threadLinks(p.repo, p.pr, item.comment_id);
   const jump = where === 'panel' && links
     ? `<button type="button" class="sc-link" data-sc-act="jump" data-sc-id="${id}">jump</button><a href="${esc(links.files)}">in files</a>`
@@ -443,7 +449,7 @@ function buildCard(state, item, where, view = {}) {
   }
   const context = [field(item, 'context'), field(item, 'fix') ? `**Plan:** ${field(item, 'fix')}` : ''].filter(Boolean).join('\n\n');
   const summary = field(item, 'summary');
-  const commits = Array.isArray(item.commits) && item.commits.length ? `<div class="sc-commits">Commits: ${item.commits.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : '';
+  const commits = Array.isArray(item.commits) && item.commits.length ? `<div class="sc-commits">Commits: ${item.commits.map(shortCommit).join(' ')}</div>` : '';
   const needNote = missingNote(state, item);
   // The box shows the text as GitHub will show it. Edit swaps in a textarea; the user's text then wins.
   const editable = !view.readOnly;
@@ -459,8 +465,8 @@ function buildCard(state, item, where, view = {}) {
   const tool = !editable ? '' : editingNow
     ? `<button type="button" class="sc-link" data-sc-act="preview" data-sc-id="${id}">Preview</button>`
     : `<button type="button" class="sc-link" data-sc-act="edit" data-sc-id="${id}" title="Change the text. Your text replaces the agent's.">✎ Edit</button>`;
-  const original = item.origin === 'user' && item.original_en && item.original_en !== d.reply
-    ? `<details class="sc-original"><summary>Your original</summary><div class="sc-md markdown-body">${renderMarkdown(item.original_en)}</div></details>` : '';
+  const original = (item.origin === 'user' || item.origin === 'earlier') && item.original_en && item.original_en !== d.reply
+    ? `<details class="sc-original"><summary>${item.origin === 'earlier' ? 'Earlier text' : 'Your original'}</summary><div class="sc-md markdown-body">${renderMarkdown(item.original_en)}</div></details>` : '';
   const buttons = decisionsFor(p).map((b, i) => {
     const bc = ['sc-btn'];
     if (d.decision === b.key) bc.push('sc-on');
@@ -544,7 +550,8 @@ function buildPanelList(state, openId, filterKey, viewOf) {
     const e = effective(state, it);
     const v = viewOf(it);
     const { decided, icon, label } = rowParts(state, it, v);
-    const meta = [esc(it.author ?? 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', v.hidden ? `<span class="sc-hidden">${modeOf(p) === 'review' ? 'folded on GitHub · decide here' : 'not loaded on page'}</span>` : '', Array.isArray(it.commits) && it.commits.length ? `commit <code>${esc(it.commits[0])}</code>` : ''].filter(Boolean).join(' · ');
+    // A review comment has no author to show; only an item without a file is general.
+    const meta = [it.author ? esc(it.author) : (it.path ? '' : 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', v.hidden ? `<span class="sc-hidden">${modeOf(p) === 'review' ? 'folded on GitHub · decide here' : 'not loaded on page'}</span>` : '', Array.isArray(it.commits) && it.commits.length ? `commit ${shortCommit(it.commits[0])}` : ''].filter(Boolean).join(' · ');
     const open = it.thread_id === openId;
     return `<div class="sc-row${decided ? ' sc-decided' : ''}${open ? ' sc-selected' : ''}" data-sc-item="${esc(it.thread_id)}">
   <div class="sc-row-main" data-sc-act="toggle" data-sc-id="${esc(it.thread_id)}">${icon}<div class="sc-row-text"><div class="sc-row-sum">${richText(field(it, 'summary') || String(it.reply_en ?? '').split('\n')[0])}</div><div class="sc-row-meta">${meta}</div></div>${label}</div>
@@ -900,7 +907,7 @@ function secondChairBootstrap() {
     const st = state && ph !== 'done' ? statusOf(state, ph, live) : null;
     const status = st ? `<div class="sc-status sc-status-${st.who}">${richText(st.text).replace(/^(Your turn\.|Agent&#39;s turn\.)/, '<b>$1</b>')}</div>${st.warn ? `<div class="sc-status sc-status-warn">${esc(st.warn)}</div>` : ''}` : '';
     const head = `<div class="sc-panel-head">
-  <div class="sc-hrow">${SC_LOGO}<b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${modeOf(state.payload)} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
+  <div class="sc-hrow">${SC_LOGO}<b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${SC_MODE_NAME[modeOf(state.payload)]} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
     ${info ? '<span class="sc-label sc-done-label">✓ Done</span>' : ''}
     <span class="sc-dot ${serverUp ? 'sc-up' : serverUp === false ? 'sc-down' : ''}" title="server ${serverUp ? 'on' : 'off'} · ${SC_SERVER}"></span>
     <button type="button" class="sc-icon" data-sc-act="guide" aria-label="How it works" title="How it works">?</button><button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
