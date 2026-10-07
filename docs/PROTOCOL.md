@@ -8,10 +8,14 @@ The decision keys live in two places in the code: `ROUND_KEYS` in `lib/protocol.
 
 | Mode | Use | Round 1 keys | Round 2 keys |
 |:--|:--|:--|:--|
-| `reply` | Answer the review threads on your own pull request | `reply`, `fix`, `pushback`, `manual` | `publish`, `hold`, `manual` |
-| `review` | Decide the comments of your pending review on someone else's pull request | `post`, `revise`, `drop` | `post`, `drop` |
+| `reply` | Answer the review threads on your own pull request | `reply`, `fix`, `pushback`, `manual` | `publish`, `revise`, `hold`, `manual` |
+| `review` | Decide the comments of your pending review on someone else's pull request | `post`, `revise`, `drop` | `post`, `revise`, `drop` |
 
 A payload without `mode` is in `reply` mode. Round 2 is the final round in both modes. `publish` acts only on round 2 decisions.
+
+A round 2 sent with at least one `revise` does not end the work. The agent rewrites those items and pushes round 2 again, and `publish` refuses such decisions.
+
+The page labels `post` as **Keep**, because in review mode nothing becomes public before the review is submitted.
 
 What each key means:
 
@@ -23,8 +27,8 @@ What each key means:
 | `manual` | The user handles the thread. The agent posts nothing. |
 | `publish` | Post the reply. |
 | `hold` | Post nothing for now. |
-| `post` | Keep the comment, with the text in the decision. For the review body: set the body. |
-| `revise` | The agent rewrites the comment as the note says. A `revise` decision needs a note that is not empty. |
+| `post` | Keep the comment, with the text in the decision. For the review body: set the body. The page shows it as **Keep**. |
+| `revise` | The agent rewrites the reply or comment as the note says. In round 2 it then pushes round 2 again instead of publishing. A `revise` decision needs a note that is not empty. |
 | `drop` | Delete the comment from the pending review. For the review body: clear it. |
 
 ## Proposals
@@ -88,8 +92,10 @@ The agent writes items, and `second-chair build` wraps them into a proposals pay
 | `reply_en` | string | Required. Markdown: the reply or comment as it will be posted. For the `BODY` item: the proposed review body. |
 | `auto` | boolean | `true` when the item needs no decision from the user. It counts as decided with its `verdict`, and the card shows one line. The user can still pick another button. In round 2, a verdict that posts text (`publish` in `reply` mode, `post` in `review` mode) cannot be `auto`. |
 | `commits` | array of strings | The commits behind the reply, usually in round 2. The card and the panel show them. |
-| `origin` | string | `"agent"` (the default) or `"user"`. `"user"` marks a comment or a review body that the user wrote. Its card says "Your draft comment". |
-| `original_en` | string | For `origin: "user"`: the user's own text. When `reply_en` is a different text, the card shows the original in a folded "Your original" block. |
+| `origin` | string | `"agent"` (the default), `"user"` or `"earlier"`. `"user"` marks a comment or a review body that the user wrote. Its card says "Your draft comment". `"earlier"` marks a comment that Second Chair added in an earlier review pass. Its card says "Second Chair · earlier pass". |
+| `original_en` | string | For `origin: "user"` or `"earlier"`: the text the comment has now. When `reply_en` is a different text, the card shows it in a folded block, "Your original" or "Earlier text". |
+| `needs_submit` | boolean | `BODY` item only. `true` when the pending review has no body. GitHub then adds a body only together with the submit, so the page asks for a submit event when the body is kept. |
+| `suggested_submit` | string | `BODY` item only, round 2. The agent's suggestion for the submit: `COMMENT`, `APPROVE` or `REQUEST_CHANGES`. The page outlines it and never picks it for the user. |
 
 Older payloads spell `summary`, `context` and `fix` as `summary_pl`, `context_pl` and `fix_pl`. The page still reads those names.
 
@@ -100,7 +106,8 @@ Older payloads spell `summary`, `context` and `fix` as `summary_pl`, `context_pl
 - a round 1 item has no `thread_id`, `verdict` or `reply_en`;
 - a round 2 item has no `thread_id` or `reply_en`;
 - a `verdict` is not a key of that mode and round;
-- `origin` is neither `agent` nor `user`;
+- `origin` is not `agent`, `user` or `earlier`;
+- `suggested_submit` is not a submit event, `needs_submit` is not a boolean, or either sits on an item other than `BODY`;
 - two items share a `thread_id`;
 - a round 2 item has `auto: true` with the verdict `publish` (`reply` mode) or `post` (`review` mode). The user approves every text that gets posted.
 
@@ -151,6 +158,7 @@ The userscript sends this when the user clicks **Send decisions**. `wait` and `g
 | `decisions[].reply_en` | string | The final text, maybe edited by the user. `publish` posts this text. |
 | `decisions[].reply_edited` | boolean | `true` when the user changed the text. |
 | `decisions[].note` | string | The user's instruction for the agent. It overrides the agent's plan. |
+| `submit` | string or null | Review mode, round 2 only. What happens to the review after `publish` applied the decisions: `COMMENT`, `APPROVE` or `REQUEST_CHANGES` submits it with that event. `null` or missing leaves it as a draft. |
 
 The server refuses decisions with `409` when:
 
@@ -162,6 +170,7 @@ The server refuses decisions with `409` when:
 - a `thread_id` is not in the proposals;
 - a `decision` is not a key of that mode and round;
 - a `revise` decision has an empty note;
+- `submit` is set outside review mode or round 2, or is not `COMMENT`, `APPROVE` or `REQUEST_CHANGES`;
 - an item has no decision.
 
 When the server is not running, the page copies the decisions to the clipboard instead. The user pastes them to the agent. The agent saves them to a file and runs `second-chair put-decisions <file>` once the server runs. The server checks them as above, and the work goes on as if the page had sent them.

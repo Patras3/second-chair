@@ -138,6 +138,9 @@ test('build wraps items, puts general items first and refuses bad ones', () => {
   const r = buildPayload({ repo: 'o/n', pr: 1, round: 1, head: 'h', mode: 'review', items: [{ thread_id: 'C', comment_id: 5, verdict: 'post', reply_en: 'x', origin: 'user', original_en: 'x' }] });
   assert.equal(r.mode, 'review');
   assert.equal(r.items[0].origin, 'user');
+  const e = buildPayload({ repo: 'o/n', pr: 1, round: 1, head: 'h', mode: 'review', items: [{ thread_id: 'C', comment_id: 5, verdict: 'post', reply_en: 'y', origin: 'earlier', original_en: 'x' }] });
+  assert.equal(e.items[0].origin, 'earlier');
+  assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 1, head: 'h', mode: 'review', items: [{ thread_id: 'C', comment_id: 5, verdict: 'post', reply_en: 'y', origin: 'bot' }] }), /origin must be agent, user or earlier/);
 });
 
 test('build refuses auto on a final-round verdict that posts', () => {

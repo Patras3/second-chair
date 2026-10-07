@@ -42,26 +42,28 @@ const SC_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fil
 const SC_DECISIONS = {
   reply: {
     1: [
-      { key: 'reply', label: 'Reply' },
-      { key: 'fix', label: 'Fix' },
-      { key: 'pushback', label: 'Push back' },
-      { key: 'manual', label: 'Manual' },
+      { key: 'reply', label: 'Reply', help: 'Answer only. No code change. The reply is posted after round 2.' },
+      { key: 'fix', label: 'Fix', help: 'The agent changes the code as planned and commits it, without pushing. You approve the reply in round 2.' },
+      { key: 'pushback', label: 'Push back', help: 'Disagree. The reply explains why. Posted after round 2.' },
+      { key: 'manual', label: 'Manual', help: 'You handle this thread yourself. The agent posts nothing.' },
     ],
     2: [
-      { key: 'publish', label: 'Publish', posts: true },
-      { key: 'hold', label: 'Hold' },
-      { key: 'manual', label: 'Manual' },
+      { key: 'publish', label: 'Publish', posts: true, help: 'Post this reply on GitHub, with the text as shown.' },
+      { key: 'revise', label: 'Revise', needsNote: true, help: 'Ask the agent for a new version. Say what to change in the note. Nothing is posted until you approve it.' },
+      { key: 'hold', label: 'Hold', help: 'Post nothing for now. The thread stays open on GitHub.' },
+      { key: 'manual', label: 'Manual', help: 'You answer this thread yourself. The agent posts nothing.' },
     ],
   },
   review: {
     1: [
-      { key: 'post', label: 'Post' },
-      { key: 'revise', label: 'Revise', needsNote: true },
-      { key: 'drop', label: 'Drop' },
+      { key: 'post', label: 'Keep', help: 'Keep this comment in your draft review, with the text as shown.' },
+      { key: 'revise', label: 'Revise', needsNote: true, help: 'Ask the agent to rewrite this comment. Say what to change in the note.' },
+      { key: 'drop', label: 'Drop', help: 'Remove this comment from your draft review.' },
     ],
     2: [
-      { key: 'post', label: 'Post', posts: true },
-      { key: 'drop', label: 'Drop' },
+      { key: 'post', label: 'Keep', posts: true, help: 'Keep this comment in your review, with the text as shown.' },
+      { key: 'revise', label: 'Revise', needsNote: true, help: 'Ask the agent for a new version. Nothing is applied until you approve it.' },
+      { key: 'drop', label: 'Drop', help: 'Remove this comment from your draft review.' },
     ],
   },
 };
@@ -364,7 +366,7 @@ function buildCard(state, item, where, view = {}) {
     if (d.decision === b.key) bc.push('sc-on');
     else if (e.auto && e.decision === b.key) bc.push('sc-on-auto');
     else if (!e.decision && item.verdict === b.key) bc.push('sc-suggested');
-    return `<button type="button" class="${bc.join(' ')}" data-sc-act="decide" data-sc-id="${id}" data-sc-val="${b.key}" title="${i + 1}">${d.decision === b.key ? '✓ ' : ''}${esc(b.label)}</button>`;
+    return `<button type="button" class="${bc.join(' ')}" data-sc-act="decide" data-sc-id="${id}" data-sc-val="${b.key}" title="${esc(b.help)} (key ${i + 1})">${d.decision === b.key ? '✓ ' : ''}${esc(b.label)}</button>`;
   }).join('');
   const footer = view.readOnly
     ? `<div class="sc-card-foot"><span class="sc-muted">Decision:</span> <b>${esc(e.decision ? decisionLabel(p, e.decision) : 'none')}</b></div>`

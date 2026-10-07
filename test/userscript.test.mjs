@@ -268,9 +268,9 @@ test('Revise counts as decided only once its note says what to change', () => {
   assert.deepEqual(out.decisions.map((d) => [d.thread_id, d.decision, d.note]), [['C1', 'revise', 'shorter, no code block'], ['BODY', 'post', '']]);
 });
 
-test('review round 2 keeps only Post and Drop, and a reply-mode export says so', () => {
+test('review round 2 offers Keep, Revise and Drop, and a reply-mode export says so', () => {
   const s = stateFor(review({ round: 2 }), null);
-  assert.deepEqual([...buildCard(s, s.payload.items[0], 'inline').matchAll(/data-sc-act="decide"[^>]*data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'drop']);
+  assert.deepEqual([...buildCard(s, s.payload.items[0], 'inline').matchAll(/data-sc-act="decide"[^>]*data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'revise', 'drop']);
   const r = stateFor(payload(), null);
   r.decisions.T1.decision = 'fix';
   r.decisions.G.decision = 'manual';
