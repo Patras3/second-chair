@@ -270,13 +270,16 @@ Its summary line counts the real changes on GitHub. A comment or a review body t
   "comments": [{"id": 1042, "author": "ana-ng", "created_at": "2026-09-28T09:12:00Z", "body": "This evicts on every put…"}]}]
 ```
 
-`pending` prints your pending review, or `null`:
+`pending` prints your pending review, or `null`. Each comment has `by`: `"second-chair"` when `draft` added it for Second Chair, `"you"` otherwise, and `"unknown"` when the server is down and cannot say:
 
 ```json
 {"review_id": 2001, "node_id": "PRR_…", "commit_id": "8c1f2a7…", "body": "",
  "comments": [{"id": 2058, "node_id": "PRRC_…", "path": "api/handlers/upload.go", "line": 58, "start_line": null,
-               "side": "RIGHT", "start_side": null, "position": 4, "in_reply_to": null, "body": "This reads the whole body into memory…"}]}
+               "side": "RIGHT", "start_side": null, "position": 4, "in_reply_to": null, "body": "This reads the whole body into memory…",
+               "by": "second-chair"}]}
 ```
+
+`draft` records the ids of the comments it added with the server (`POST /api/drafted`), so a later review pass can tell them from the user's. After a rebuild it records the new ids. It refuses a comment on lines that already hold a pending comment (same file and side, overlapping lines), names that comment, and changes nothing: a second pass proposes a new text for the existing comment instead. `--allow-same-line` lets a separate point on the same lines through.
 
 `draft` reads a list of comments. `line` must be a line that the diff changed or shows. A range adds `start_line` below `line`. `side` is `RIGHT` by default, and `LEFT` for a removed line.
 

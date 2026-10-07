@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { draft, shapeThreads, fetchThreads, fetchPending, resolvePr, parseGhVersion, versionAtLeast, GH_FLOOR, ghError } from '../lib/github.mjs';
+import { draft, sameLineClash, markAuthors, rebuiltIds, draftedIds, shapeThreads, fetchThreads, fetchPending, resolvePr, parseGhVersion, versionAtLeast, GH_FLOOR, ghError } from '../lib/github.mjs';
 import { fakeGh, has } from './fake-gh.mjs';
 
 const fx = (n) => JSON.parse(readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf8'));
@@ -382,4 +382,46 @@ test('draft with no comments refuses when I have a pending review or give no bod
     await assert.rejects(draft(f.gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [], body, backupDir: tmpdir() }), /at least one comment.*Nothing was changed/);
     assert.equal(f.calls.length, 0);
   }
+});
+
+test('sameLineClash finds a new comment on lines that already have one', () => {
+  const existing = [{ id: 1, path: 'a.js', line: 10, start_line: 8, side: 'RIGHT', body: 'x' }];
+  assert.equal(sameLineClash(existing, [{ path: 'a.js', line: 12, body: 'y' }]), null);
+  assert.equal(sameLineClash(existing, [{ path: 'b.js', line: 9, body: 'y' }]), null);
+  assert.equal(sameLineClash(existing, [{ path: 'a.js', line: 9, side: 'LEFT', body: 'y' }]), null);
+  assert.equal(sameLineClash(existing, [{ path: 'a.js', line: 3, body: 'y' }, { path: 'a.js', line: 9, body: 'z' }]).index, 1);
+  assert.equal(sameLineClash(existing, [{ path: 'a.js', start_line: 10, line: 14, body: 'r' }]).existing.id, 1);
+  assert.equal(sameLineClash([{ id: 2, path: 'a.js', line: null, position: 3 }], [{ path: 'a.js', line: 3, body: 'y' }]), null);
+});
+
+test('markAuthors tells Second Chair comments from yours', () => {
+  const out = markAuthors({ review_id: 1, comments: [{ id: 5 }, { id: 6 }] }, [6]);
+  assert.deepEqual(out.comments.map((c) => c.by), ['you', 'second-chair']);
+  assert.equal(markAuthors(null, [1]), null);
+});
+
+test('rebuiltIds maps recreated comments by place and text', () => {
+  const m = rebuiltIds([{ id: 1, path: 'a', line: 2, side: 'RIGHT', body: 'x' }], [{ id: 9, path: 'a', line: 2, side: 'RIGHT', body: 'x' }, { id: 10, path: 'a', line: 3, side: 'RIGHT', body: 'y' }]);
+  assert.deepEqual([...m], [[1, 9]]);
+});
+
+test('draftedIds keeps earlier Second Chair comments and adds the new ones, never yours', () => {
+  const before = [{ id: 1, path: 'a', line: 1, body: 'mine' }, { id: 2, path: 'a', line: 5, body: 'agent' }];
+  const after = [...before, { id: 3, path: 'a', line: 9, body: 'new' }];
+  assert.deepEqual(draftedIds({ before, after, prior: [2], recreated: false }), [2, 3]);
+  const rebuilt = [{ id: 11, path: 'a', line: 1, body: 'mine' }, { id: 12, path: 'a', line: 5, body: 'agent' }, { id: 13, path: 'a', line: 9, body: 'new' }];
+  assert.deepEqual(draftedIds({ before, after: rebuilt, prior: [2], recreated: true }), [12, 13]);
+  assert.deepEqual(draftedIds({ before: [], after: [{ id: 7, path: 'a', line: 1, body: 'n' }], prior: [], recreated: false }), [7]);
+});
+
+test('draft refuses a second comment on the same lines, unless told it is a separate point', async () => {
+  const onB = { path: 'src/b.js', line: 6, side: 'LEFT', body: 'Same lines as 5002.' };
+  const { gh, calls } = fakeGh(pendingScript([
+    { match: has('graphql'), reply: { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_new' } } } } },
+  ], threadsQuery(fx('threads-pending.json'))));
+  await assert.rejects(draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [newComment, onB], backupDir: tmpdir() }),
+    /comment 2 \(src\/b.js:6\) lands where src\/b.js:7 already has a pending comment \(id 5002\).*propose a new text for it.*Nothing was changed/);
+  assert.equal(writes(calls).length, 0);
+  await draft(gh, { repo: 'octo-org/example', pr: 3, head: 'abc', comments: [onB], allowSameLine: true, backupDir: tmpdir() });
+  assert.equal(writes(calls).length, 1);
 });
