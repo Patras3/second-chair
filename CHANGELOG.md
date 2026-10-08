@@ -2,32 +2,9 @@
 
 ## 1.1.5
 
-Not released yet: no tag and no GitHub Release.
-
-- In review mode a card under its own pending comment no longer repeats the comment. The caption says **Comment above**, and **✎ Edit** opens the text. The card shows the text when it differs from the comment on GitHub: the agent's rewrite, or your edit. In the side panel the card still shows the text.
-
-## 1.1.4
-
-- The review tour says what the main comment is and when you choose **Approve**, **Comment** or **Request changes**: in round 2, after you decided each comment.
-
-## 1.1.3
-
-- The tour asks before it starts: **Show me** or **Not now**. A user who has seen no tour yet gets a short welcome that says what Second Chair does on this screen.
-- The tour now shows the yellow **For you** box in review mode too, and the note for the agent in every tour, with an example.
-- A part of the panel taller than the panel, such as a long review body, is lit only where it is on screen, and the note points at it.
-
-## 1.1.2
-
-- A live tour replaces the text guide. The first time you see the cards of a mode and round, the page dims and one part of Second Chair at a time lights up, with a short note and **Next**, **Back** and **Skip**. Each tour has three to seven steps. The **?** in the side panel starts it again.
-
-## 1.1.1
-
-- The filter bar in the side panel no longer shows a scroll bar of its own.
-
-## 1.1.0
-
 Added:
 
+- A live tour. The first time you see the cards of a mode and round, Second Chair asks whether to show it: **Show me** or **Not now**. The page then dims, and one part of Second Chair at a time lights up, with a short note and **Next**, **Back** and **Skip**. Each tour has four to eight steps. The **?** in the side panel starts it again.
 - A status line under the panel header says whose turn it is and what happens next.
 - After you send a round, the panel waits for the agent and shows when the agent picked your decisions up. The next round opens by itself, without a reload.
 - **Edit and send again** while the agent works on a round. `second-chair push` refuses the next round until the agent read the change, so the agent always sees it.
@@ -38,6 +15,7 @@ Added:
 
 Changed:
 
+- In review mode a card under its own pending comment no longer repeats the comment. The caption says **Comment above**, and **✎ Edit** opens the text. The card shows the text when it differs from the comment on GitHub: the agent's rewrite, or your edit. In the side panel the card still shows the text.
 - The work on a pull request is done when the agent closes it after `publish`, not at the final send. Until then the panel says that the agent publishes.
 - Review mode labels **Post** as **Keep**, because nothing becomes public before the review is submitted.
 - Every button explains itself in its tooltip.
@@ -51,6 +29,7 @@ Fixed:
 - **Write**, **expand**, **jump** and the arrows did nothing on the Files changed tab. GitHub's own code took the clicks. Every control is now a button, and Second Chair handles its clicks first.
 - Review rows said "general" next to every comment.
 - After a send, the text could still be edited, and the edit went nowhere.
+- The filter bar in the side panel no longer shows a scroll bar of its own.
 
 ## 1.0.1
 
