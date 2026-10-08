@@ -235,7 +235,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   });
   const rv = await openPage(browser, port, null, 8);
   await rv.waitForSelector(card('C1'));
-  check((await rv.textContent(card('C1'))).includes('Comment · stays in your draft review'), 'a review comment card says where its text goes');
+  check((await rv.textContent(card('C1'))).includes('Comment above · stays in your draft review') && await rv.locator(`${card('C1')} .sc-reply-box`).count() === 0, 'a review comment card says where its text goes, without repeating it');
   await rv.click(`${card('C1')} [data-sc-val=revise]`);
   await rv.click('.sc-toggle');
   await rv.click(`.sc-yourreview ${card('BODY', 'panel')} [data-sc-val=post]`);

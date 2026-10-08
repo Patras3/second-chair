@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Second Chair
 // @namespace    https://github.com/Patras3/second-chair
-// @version      1.1.4
+// @version      1.1.5
 // @icon         data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%20fill=%22none%22%20stroke=%22%231f2328%22%20stroke-width=%221.5%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22%3E%3Cpath%20d=%22M5.75%201.75%205.25%209.25M3.75%209.25h8.5M5.25%209.25l-1%205M11%209.25l1%205%22/%3E%3C/svg%3E
 // @description  AI prepares. You decide. Your agent's proposal for every review thread, next to it on GitHub.
 // @match        https://github.com/*
@@ -464,8 +464,11 @@ function buildCard(state, item, where, view = {}) {
   const reply = editingNow
     ? `<textarea class="sc-reply" data-sc-field="reply" data-sc-id="${id}" rows="${rowsFor(d.reply, where === 'panel' ? 70 : 110)}">${esc(d.reply)}</textarea><div class="sc-hint">${esc("Your text replaces the agent's. Esc to finish.")}</div>`
     : editable ? `<div class="sc-preview" data-sc-act="edit" data-sc-id="${id}" title="Click to edit">${shown}</div>` : shown;
+  // Under its own pending comment the card would only repeat it. It shows the text once it differs from GitHub's:
+  // the agent's rewrite of a comment, or the user's edit.
+  const onPage = review && where === 'inline' && Boolean(item.comment_id) && !editingNow && Boolean(d.reply) && d.reply === (item.original_en ?? item.reply_en);
   const caption = review
-    ? (item.comment_id ? 'Comment · stays in your draft review' : 'Review body · added to your review')
+    ? (onPage ? 'Comment above · stays in your draft review' : item.comment_id ? 'Comment · stays in your draft review' : 'Review body · added to your review')
     : p.round < SC_FINAL_ROUND ? 'Draft reply · posted only if you approve it in round 2' : 'Reply · posted when you choose Publish';
   const undo = d.replyEdited && editable ? `<button type="button" class="sc-link" data-sc-act="undo" data-sc-id="${id}">Undo my edits</button>` : '';
   const tool = !editable ? '' : editingNow
@@ -491,7 +494,7 @@ function buildCard(state, item, where, view = {}) {
     ${context ? `<div class="sc-foryou"><div class="sc-foryou-title">For you <span class="sc-muted">· never posted</span></div><div class="sc-md markdown-body">${renderMarkdown(context)}</div></div>` : ''}
     ${commits}
     <div class="sc-caption"><span>${caption}${d.replyEdited ? ' <span class="sc-edited">· edited by you</span>' : ''}</span><span class="sc-caption-tools">${undo}${tool}</span></div>
-    <div class="sc-reply-box${editingNow ? ' sc-editing' : ''}">${reply}</div>
+    ${onPage ? '' : `<div class="sc-reply-box${editingNow ? ' sc-editing' : ''}">${reply}</div>`}
     ${original}
   </div>
   ${footer}
@@ -594,7 +597,7 @@ const SC_TOURS = {
   'review:1': [
     { at: 'card', sel: null, text: 'A comment in your draft review on GitHub. Only you can see it.' },
     { at: 'card', sel: '.sc-foryou', text: 'The yellow box is only for you: why the agent wrote this comment. It is never posted.' },
-    { at: 'card', sel: '.sc-reply-box', text: 'The comment as it stands. Click it to change the words.' },
+    { at: 'card', sel: '.sc-caption', text: 'Where the comment stays. ✎ Edit changes its words.' },
     { at: 'card', sel: '.sc-seg', text: 'Keep it, ask the agent to revise it, or drop it from the review.' },
     { at: 'card', sel: '.sc-note', text: 'A note tells the agent what to change, and is never posted. For example: "Shorter, and link the docs page."' },
     { at: 'panel', sel: '.sc-yourreview', text: 'The main comment sits at the top of your review, above the line comments. Approve or Request changes comes in round 2.' },

@@ -249,10 +249,26 @@ test('review mode offers Post, Revise and Drop, and labels the text as a comment
   const s = stateFor(review(), null);
   const card = buildCard(s, s.payload.items[0], 'inline');
   assert.deepEqual([...card.matchAll(/data-sc-act="decide"[^>]*data-sc-val="([a-z]+)"/g)].map((m) => m[1]), ['post', 'revise', 'drop']);
-  assert.ok(card.includes('Comment · stays in your draft review'));
+  assert.ok(buildCard(s, s.payload.items[0], 'panel').includes('Comment · stays in your draft review'));
   assert.ok(buildCard(s, s.payload.items[1], 'panel').includes('Review body · added to your review'));
   assert.match(parsePayload(JSON.stringify(review({ mode: 'other' }))).error, /Unknown mode/);
   assert.match(parsePayload(JSON.stringify(review({ round: 3 }))).error, /Unknown round/);
+});
+
+test('under its own pending comment a review card does not repeat the text, until it differs from GitHub', () => {
+  const s = stateFor(review(), null);
+  const c1 = s.payload.items[0];
+  const inline = buildCard(s, c1, 'inline');
+  assert.ok(inline.includes('Comment above · stays in your draft review'));
+  assert.ok(!inline.includes('sc-reply-box') && !inline.includes('A finding.'));
+  assert.match(inline, /data-sc-act="edit"[^>]*>✎ Edit<\/button>/);
+  assert.ok(buildCard(s, c1, 'panel').includes('A finding.'));
+  assert.match(buildCard(s, c1, 'inline', { editing: true }), /<textarea class="sc-reply"/);
+  s.decisions.C1.reply = 'Mine.';
+  s.decisions.C1.replyEdited = true;
+  assert.match(buildCard(s, c1, 'inline'), /Comment · stays in your draft review[\s\S]*sc-reply-box[\s\S]*Mine\./);
+  const r = stateFor(review({ items: [{ thread_id: 'C', comment_id: 5, verdict: 'revise', origin: 'earlier', original_en: 'old words', reply_en: 'new words', path: 'a.md', line: 1 }] }), null);
+  assert.match(buildCard(r, r.payload.items[0], 'inline'), /sc-reply-box[\s\S]*new words/);
 });
 
 test('Revise counts as decided only once its note says what to change', () => {

@@ -1,8 +1,12 @@
 # Changelog
 
-## 1.1.4
+## 1.1.5
 
 Not released yet: no tag and no GitHub Release.
+
+- In review mode a card under its own pending comment no longer repeats the comment. The caption says **Comment above**, and **✎ Edit** opens the text. The card shows the text when it differs from the comment on GitHub: the agent's rewrite, or your edit. In the side panel the card still shows the text.
+
+## 1.1.4
 
 - The review tour says what the main comment is and when you choose **Approve**, **Comment** or **Request changes**: in round 2, after you decided each comment.
 
