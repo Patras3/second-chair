@@ -194,7 +194,7 @@ In round 2 of respond mode the user can leave a note under a file of the diff. T
 ```
 
 - `sha` and `path` name a commit of `changes.commits` and a file of that commit. The note has a `text` that is not empty.
-- `view` is `"range"` or `"commit"`. A new-side line number is the line in that file at HEAD in both views. An old-side number is the line at the base in `"range"`, and the line in the commit's parent in `"commit"`. A `"range"` note's `sha` is the last commit that changed the file.
+- `view` is `"range"` or `"commit"`. In `"range"`, a new-side line number is the line in that file at HEAD, and an old-side number is the line at the base. In `"commit"`, a new-side number is the line in the file as of `sha` (`git show <sha>:<path>`), and an old-side number is the line in the file in the parent of `sha`. A `"range"` note's `sha` is the last commit that changed the file.
 - There is one note per `sha`, `path` and `view`.
 - `thread_ids` are the threads whose item cites the `sha` in `commits`. The server computes the same set and refuses a mismatch.
 - Each of those threads has the decision `change`. Every `change` is covered by a note.
@@ -284,8 +284,8 @@ For the threads on your own pull request.
 8. `second-chair build --repo O/N --pr N --round 2 --head $(git rev-parse HEAD) --base $(gh pr view N --json headRefOid -q .headRefOid) items2.json > r2.json`, from the pull request's working tree. Then `push`, then `wait --round 2`. If `push` refuses because the decisions changed, run the `get` command it names, redo what changed, and push again.
    - When the decisions hold a `revise`, rewrite those replies and repeat this step.
    - When they hold a `change`, read `code_notes` and change the code. Make a new commit or rewrite the unpushed commits, but keep the base an ancestor of HEAD. Update `commits` and the reply text so they name the new shas, then repeat this step. Never push while a `change` is open.
-9. Check that `git rev-parse HEAD` equals `changes.head` of the round 2 the user decided. If it differs, the user has not seen the code: repeat step 8. Otherwise run `git push`, when a reply to publish refers to a commit.
-10. `second-chair publish --repo O/N --pr N`. For each `publish` decision it posts `reply_en` as a reply to `comment_id`. A general item becomes a pull request comment. `hold` and `manual` post nothing. It refuses while a decision is `revise` or `change`, or `code_notes` is not empty. It also refuses when the pull request's head on GitHub (`headRefOid`) is not `changes.head`, with a hint to wait a few seconds and run it again, or to build and push round 2 again. It posts nothing in both cases.
+9. Check that `git rev-parse HEAD` equals `changes.head` of the round 2 the user decided. If it differs, the user has not seen the code: repeat step 8. Otherwise run `git push`, but only when a reply the user decided to `publish` refers to a commit. When none does, do not push.
+10. `second-chair publish --repo O/N --pr N`. For each `publish` decision it posts `reply_en` as a reply to `comment_id`. A general item becomes a pull request comment. `hold` and `manual` post nothing. It refuses while a decision is `revise` or `change`, or `code_notes` is not empty. It also checks the pull request's head on GitHub (`headRefOid`) before any write. When a reply to post refers to a commit, the head must be `changes.head`. Otherwise `changes.base` or `changes.head` is fine. With nothing left to post, it makes no check. A wrong head gets a hint to wait a few seconds and run it again, or to build and push round 2 again. It posts nothing in all these cases.
 11. `second-chair close --repo O/N --pr N`.
 
 ## Call order: review

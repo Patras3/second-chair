@@ -341,6 +341,53 @@ test('publish refuses when GitHub has another head than the one the user approve
   const decisions = { decisions: p.items.map((it) => ({ thread_id: it.thread_id, decision: 'publish', reply_en: it.reply_en })) };
   const { api } = fakeServer({ proposals: p, decisions });
   const { gh, calls } = fakeGh([...noPending, headIs('9'.repeat(40))]);
-  await assert.rejects(publish({ gh, api, repo: p.repo, pr: p.pr }), /GitHub has 9999999 but the user approved ddddddd/);
+  await assert.rejects(publish({ gh, api, repo: p.repo, pr: p.pr }), /GitHub has 9999999 but the user saw eeeeeee to ddddddd/);
   assert.equal(writes(calls).length, 0);
+});
+
+const BASE = 'e'.repeat(40);
+const citing = (over = {}) => {
+  const p = withChanges();
+  p.items = p.items.map((it, i) => (i === 1 ? { ...it, commits: [SHA_H] } : it));
+  return { ...p, ...over };
+};
+const decide = (p, verdicts) => ({ decisions: p.items.map((it) => ({ thread_id: it.thread_id, decision: verdicts[it.thread_id] ?? 'hold', reply_en: it.reply_en })) });
+const postsFor = (calls) => writes(calls).filter((c) => c.args.some((a) => a.includes('/replies') || a.includes('issues/3/comments')));
+
+test('a matching head passes the check and the reply is posted', async () => {
+  const p = citing();
+  const { api } = fakeServer({ proposals: p, decisions: decide(p, { T1: 'publish' }) });
+  const { gh, calls } = fakeGh([...noPending, headIs(SHA_H), { match: has('/replies'), reply: { html_url: 'u' } }]);
+  const r = await publish({ gh, api, repo: p.repo, pr: p.pr, log() {} });
+  assert.deepEqual(r.done, ['T1']);
+  assert.equal(postsFor(calls).length, 1);
+});
+
+test('a held reply that cites a commit does not need the push: another reply posts with the old head', async () => {
+  const p = citing();
+  const { api } = fakeServer({ proposals: p, decisions: decide(p, { T1: 'hold', T3: 'publish' }) });
+  const { gh, calls } = fakeGh([...noPending, headIs(BASE), { match: has('/replies'), reply: { html_url: 'u' } }]);
+  const r = await publish({ gh, api, repo: p.repo, pr: p.pr, log() {} });
+  assert.deepEqual(r.done, ['T3']);
+  assert.equal(postsFor(calls).length, 1);
+});
+
+test('a published reply that cites a commit is refused while GitHub still has the old head', async () => {
+  const p = citing();
+  const { api } = fakeServer({ proposals: p, decisions: decide(p, { T1: 'publish' }) });
+  const { gh, calls } = fakeGh([...noPending, headIs(BASE)]);
+  await assert.rejects(publish({ gh, api, repo: p.repo, pr: p.pr, log() {} }), /GitHub has eeeeeee.*Nothing was posted/);
+  assert.equal(writes(calls).length, 0);
+});
+
+test('a rerun with everything recorded makes no pr view call', async () => {
+  const p = citing();
+  const srv = fakeServer({ proposals: p, decisions: decide(p, { T1: 'publish' }) });
+  const g1 = fakeGh([...noPending, headIs(SHA_H), { match: has('/replies'), reply: { html_url: 'u' } }]);
+  await publish({ gh: g1.gh, api: srv.api, repo: p.repo, pr: p.pr, log() {} });
+  for (const it of p.items) srv.published[it.thread_id] ??= { action: 'x' };
+  const g2 = fakeGh([...noPending]);
+  const r = await publish({ gh: g2.gh, api: srv.api, repo: p.repo, pr: p.pr, log() {} });
+  assert.equal(r.done.length, 0);
+  assert.equal(g2.calls.filter((c) => c.args.includes('pr')).length, 0);
 });
