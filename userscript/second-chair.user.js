@@ -38,7 +38,8 @@ const SC_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fil
 // Decision buttons per mode and round. `reply` answers the threads on your own pull request; `review`
 // decides the comments of a pending review you are about to submit. A decision with `needsNote` counts
 // only once the note says what to change. A decision with `posts` puts text on GitHub, so `auto` never
-// picks it: the user approves every posted text.
+// picks it: the user approves every posted text. A `derived` decision has no button: the page sets it from the
+// notes on the code.
 const SC_DECISIONS = {
   reply: {
     1: [
@@ -52,6 +53,7 @@ const SC_DECISIONS = {
       { key: 'revise', label: 'Revise', needsNote: true, help: 'Ask the agent for a new version. Say what to change in the note. Nothing is posted until you approve it.' },
       { key: 'hold', label: 'Hold', help: 'Post nothing for now. The thread stays open on GitHub.' },
       { key: 'manual', label: 'Manual', help: 'You answer this thread yourself. The agent posts nothing.' },
+      { key: 'change', label: 'Change code', derived: true, help: 'Set by a note on the code. The agent changes the code, and you decide the reply again on the new commit.' },
     ],
   },
   review: {
@@ -84,6 +86,11 @@ function modeOf(payload) {
 /** The decision buttons for a payload's mode and round, or undefined when either is unknown. */
 function decisionsFor(payload) {
   return SC_DECISIONS[modeOf(payload)]?.[payload?.round];
+}
+
+/** The decisions the user picks with a button or a number key: all but the derived ones. */
+function choicesFor(payload) {
+  return decisionsFor(payload).filter((b) => !b.derived);
 }
 
 function esc(s) {
@@ -325,7 +332,7 @@ const SC_FILTERS = [
 
 /** The filter chips for a round: the fixed ones, then one per decision. */
 function filtersFor(payload) {
-  return [...SC_FILTERS, ...decisionsFor(payload).map((b) => ({ key: `d:${b.key}`, label: b.label, test: (e) => e.decision === b.key }))];
+  return [...SC_FILTERS, ...choicesFor(payload).map((b) => ({ key: `d:${b.key}`, label: b.label, test: (e) => e.decision === b.key }))];
 }
 
 function visibleItems(state, filterKey) {
@@ -476,7 +483,7 @@ function buildCard(state, item, where, view = {}) {
     : `<button type="button" class="sc-link" data-sc-act="edit" data-sc-id="${id}" title="Change the text. Your text replaces the agent's.">✎ Edit</button>`;
   const original = (item.origin === 'user' || item.origin === 'earlier') && item.original_en && item.original_en !== d.reply
     ? `<details class="sc-original"><summary>${item.origin === 'earlier' ? 'Earlier text' : 'Your original'}</summary><div class="sc-md markdown-body">${renderMarkdown(item.original_en)}</div></details>` : '';
-  const buttons = decisionsFor(p).map((b, i) => {
+  const buttons = choicesFor(p).map((b, i) => {
     const bc = ['sc-btn'];
     if (d.decision === b.key) bc.push('sc-on');
     else if (e.auto && e.decision === b.key) bc.push('sc-on-auto');
@@ -572,7 +579,7 @@ function buildPanelList(state, openId, filterKey, viewOf) {
 function buildFilterBar(state, filterKey) {
   const count = (test) => state.payload.items.filter((it) => test(effective(state, it))).length;
   const tabs = SC_FILTERS.map((f) => `<button type="button" class="sc-ftab${f.key === filterKey ? ' sc-ftab-on' : ''}" data-sc-act="filter" data-sc-val="${f.key}">${esc(f.label)}<b>${count(f.test)}</b></button>`).join('');
-  const options = decisionsFor(state.payload).map((b) => `<option value="d:${b.key}"${`d:${b.key}` === filterKey ? ' selected' : ''}>${esc(b.label)} (${count((e) => e.decision === b.key)})</option>`).join('');
+  const options = choicesFor(state.payload).map((b) => `<option value="d:${b.key}"${`d:${b.key}` === filterKey ? ' selected' : ''}>${esc(b.label)} (${count((e) => e.decision === b.key)})</option>`).join('');
   return `<div class="sc-tabbar">${tabs}<select class="sc-fdecision" data-sc-act="filterselect"><option value="">Decision</option>${options}</select></div>`;
 }
 
@@ -965,7 +972,7 @@ function secondChairBootstrap() {
     // Without proposals the panel explains how to start; it carries its own paste box when the server is down.
     const empty = state ? '' : emptyPanel(loc, serverUp);
     const paste = message?.showPaste && !(empty && serverUp === false) ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
-    const keys = state ? `<div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${decisionsFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div>` : '';
+    const keys = state ? `<div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${choicesFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div>` : '';
     let foot = '';
     if (ph === 'decide') {
       foot = `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete && !lock ? '' : 'disabled'}>${sendLabel(pr)}</button><div class="sc-lock"${lock ? '' : ' hidden'}>${esc(lock ?? '')}</div>${keys}</div>`;
@@ -1619,7 +1626,7 @@ function secondChairBootstrap() {
     } else if (act === 'decide') {
       const d = state?.decisions[id];
       const key = el.dataset.scVal;
-      if (!d || locked() || !decisionsFor(state.payload).some((b) => b.key === key)) return;
+      if (!d || locked() || !choicesFor(state.payload).some((b) => b.key === key)) return;
       d.decision = d.decision === key ? null : key;
       save();
       refreshThread(id);
@@ -1657,7 +1664,7 @@ function secondChairBootstrap() {
       toggleSet(panelOpen, openId);
       refreshThread(openId);
     } else if (openId && /^[1-9]$/.test(e.key)) {
-      const b = decisionsFor(state.payload)[Number(e.key) - 1];
+      const b = choicesFor(state.payload)[Number(e.key) - 1];
       if (!b || locked()) return;
       const d = state.decisions[openId];
       d.decision = d.decision === b.key ? null : b.key;

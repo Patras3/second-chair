@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -743,4 +743,12 @@ test('a Revise clears on the new version, also when the user had edited the repl
 test('the summary counts only the threads of this round', () => {
   const s = decideAll(at(2), 'publish');
   assert.equal(publishedSummary(s, { items: { T1: { action: 'replied' }, OLD1: { action: 'replied' }, OLD2: { action: 'replied' } } }), 'Posted 1 reply. 1 not posted.');
+});
+
+test('the derived change key is no button, no number key and no filter option', () => {
+  const p = { ...payload({ round: 2 }), items: [{ thread_id: 'T1', comment_id: 11, verdict: 'publish', reply_en: 'x' }] };
+  assert.deepEqual(choicesFor(p).map((b) => b.key), ['publish', 'revise', 'hold', 'manual']);
+  const s = stateFor(p, null);
+  assert.doesNotMatch(buildCard(s, p.items[0], 'inline', {}), /data-sc-val="change"/);
+  assert.doesNotMatch(buildFilterBar(s, 'all'), /d:change/);
 });
