@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor', 'notesFor', 'noteKey', 'withoutPatches', 'hasPatches', 'splitPatches'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor, notesFor, noteKey, withoutPatches, hasPatches, splitPatches } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -751,4 +751,84 @@ test('the derived change key is no button, no number key and no filter option', 
   const s = stateFor(p, null);
   assert.doesNotMatch(buildCard(s, p.items[0], 'inline', {}), /data-sc-val="change"/);
   assert.doesNotMatch(buildFilterBar(s, 'all'), /d:change/);
+});
+
+const SA = 'a'.repeat(40);
+const SB = 'b'.repeat(40);
+const r2 = (over = {}) => ({
+  tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 2, head: SB, published_at: 'p1',
+  items: [
+    { thread_id: 'T1', comment_id: 11, verdict: 'publish', reply_en: 'Fixed in a.', commits: [SA] },
+    { thread_id: 'T2', comment_id: 22, verdict: 'publish', reply_en: 'Fixed in b.', commits: [SB] },
+  ],
+  changes: { base: 'c'.repeat(40), head: SB, add: 2, del: 0, commits: [{ sha: SA, subject: 'a', add: 1, del: 0, files: [{ path: 'f', add: 1, del: 0, binary: false }] }, { sha: SB, subject: 'b', add: 1, del: 0, files: [{ path: 'g', add: 1, del: 0, binary: false }] }], range: { files: [] } },
+  ...over,
+});
+const noteA = { sha: SA, path: 'f', view: 'commit', lines: [{ side: 'new', n: 3 }], text: 'Not like this.' };
+
+test('a note on a cited commit makes the reply Change code, and deleting it brings the choice back', () => {
+  const s = stateFor(r2(), null);
+  s.decisions.T1.decision = 'publish';
+  s.codeNotes[noteKey(noteA)] = noteA;
+  assert.deepEqual(effective(s, s.payload.items[0]), { decision: 'change', auto: false });
+  assert.deepEqual(effective(s, s.payload.items[1]), { decision: null, auto: false });
+  assert.equal(notesFor(s, s.payload.items[0]).length, 1);
+  assert.equal(hasRevise(s), true);
+  delete s.codeNotes[noteKey(noteA)];
+  assert.deepEqual(effective(s, s.payload.items[0]), { decision: 'publish', auto: false });
+});
+
+test('the export carries the code notes with the threads they lock', () => {
+  const s = stateFor(r2(), null);
+  s.decisions.T2.decision = 'hold';
+  s.codeNotes[noteKey(noteA)] = noteA;
+  const out = buildExport(s, 'now');
+  assert.deepEqual(out.decisions.map((d) => [d.thread_id, d.decision]), [['T1', 'change'], ['T2', 'hold']]);
+  assert.deepEqual(out.code_notes, [{ ...noteA, thread_ids: ['T1'] }]);
+  const plain = stateFor(r2({ changes: undefined }), null);
+  plain.decisions.T1.decision = 'hold';
+  plain.decisions.T2.decision = 'hold';
+  assert.equal('code_notes' in buildExport(plain, 'now'), false);
+});
+
+test('a new publication drops the notes and asks again for a reply that was Change code or cites new commits', () => {
+  const s = stateFor(r2(), null);
+  s.decisions.T1.decision = 'publish';
+  s.decisions.T2.decision = 'publish';
+  s.codeNotes[noteKey(noteA)] = noteA;
+  const same = stateFor(r2(), s);
+  assert.equal(Object.keys(same.codeNotes).length, 1, 'the same publication keeps the notes');
+  const next = r2({ published_at: 'p2' });
+  const n = stateFor(next, s);
+  assert.deepEqual(n.codeNotes, {});
+  assert.equal(n.decisions.T1.decision, null, 'Change code was answered by the new publication');
+  assert.equal(n.decisions.T2.decision, 'publish', 'an untouched reply keeps its choice');
+  const moved = r2({ published_at: 'p3' });
+  moved.items[1] = { ...moved.items[1], commits: [SA] };
+  assert.equal(stateFor(moved, n).decisions.T2.decision, null, 'a reply that now cites other commits is decided again');
+});
+
+test('withoutPatches strips patches and hasPatches tells', () => {
+  const p = r2();
+  p.changes.commits[0].files[0].patch = '@@ -1 +1 @@\n+x\n';
+  assert.equal(hasPatches(p), true);
+  assert.equal(hasPatches(withoutPatches(p)), false);
+  assert.equal(withoutPatches(p).changes.commits[0].files[0].add, 1);
+});
+
+test('round 2 waiting says the agent changes the code when a note was sent', () => {
+  const s = stateFor(r2(), null);
+  s.codeNotes[noteKey(noteA)] = noteA;
+  s.sentAt = 'now';
+  assert.match(statusOf(s, 'waiting').text, /changes the code you noted/);
+});
+
+test('a payload with patches is split, so the stored state never holds them', () => {
+  const p = r2();
+  p.changes.commits[0].files[0].patch = '@@ -1 +1 @@\n+x\n';
+  const { payload, patches } = splitPatches(p);
+  assert.equal(hasPatches(payload), false);
+  assert.equal(patches.commits[0].files[0].patch, '@@ -1 +1 @@\n+x\n');
+  assert.equal(splitPatches(r2()).patches, null);
+  assert.equal(JSON.stringify(stateFor(payload, null)).includes('+x'), false);
 });

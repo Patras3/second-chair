@@ -153,6 +153,23 @@ function checkPayload(p) {
   return { payload: p };
 }
 
+/** True when the payload still carries patch texts, as a payload pasted from `build` does. */
+function hasPatches(p) {
+  return Boolean(p?.changes) && [...p.changes.commits, ...p.changes.range.files.map((f) => ({ files: [f] }))].some((k) => k.files.some((f) => typeof f.patch === 'string'));
+}
+
+/** A copy without patch texts. The stored state never holds them: GM storage is small and written on every key. */
+function withoutPatches(p) {
+  if (!p?.changes) return p;
+  const lean = ({ patch, ...rest }) => rest;
+  return { ...p, changes: { ...p.changes, commits: p.changes.commits.map((k) => ({ ...k, files: k.files.map(lean) })), range: { ...p.changes.range, files: p.changes.range.files.map(lean) } } };
+}
+
+/** A loaded payload split in two: the payload the state keeps, and the patches, or null when it has none. */
+function splitPatches(payload) {
+  return { payload: withoutPatches(payload), patches: hasPatches(payload) ? payload.changes : null };
+}
+
 /** Parses pasted text; returns { payload } or { error }. */
 function parsePayload(text) {
   let p;
@@ -171,14 +188,17 @@ function stateFor(payload, previous) {
   const decisions = {};
   for (const it of payload.items) {
     let old = keep[it.thread_id];
-    // A Revise asked the agent for a new version. Once a new publication brings it, the request is answered:
-    // start over from the agent's new text, even when the user had edited the old one.
-    const answered = old?.decision === 'revise' && (previous.payload.published_at ?? null) !== (payload.published_at ?? null);
-    if (answered) old = null;
+    const newPublication = sameRound && (previous.payload.published_at ?? null) !== (payload.published_at ?? null);
+    const before = sameRound ? previous.payload.items.find((x) => x.thread_id === it.thread_id) : null;
+    // A Revise or a Change code asked the agent for something new. Once a new publication brings it, the request is
+    // answered: start over from the agent's new version, even when the user had edited the old text.
+    const wasChange = Boolean(before) && notesFor(previous, before).length > 0;
+    if (newPublication && (old?.decision === 'revise' || wasChange)) old = null;
+    // A reply that now cites other commits is about other code: the user decides it again.
+    const commitsMoved = Boolean(old) && (before?.commits ?? []).join() !== (it.commits ?? []).join();
     // A reply you edited survives a re-import; an untouched one takes the agent's new draft. A decision you
     // made on the old draft does not count for a new one: you approve the text that will be posted.
-    const before = old && !old.replyEdited ? previous.payload.items.find((x) => x.thread_id === it.thread_id) : null;
-    const changed = Boolean(old) && !old.replyEdited && (before?.reply_en ?? '') !== (it.reply_en ?? '');
+    const changed = Boolean(old) && ((!old.replyEdited && (before?.reply_en ?? '') !== (it.reply_en ?? '')) || commitsMoved);
     decisions[it.thread_id] = old
       ? { decision: changed ? null : old.decision, note: changed ? '' : old.note ?? '', reply: old.replyEdited ? old.reply : (it.reply_en ?? ''), replyEdited: Boolean(old.replyEdited) }
       : { decision: null, note: '', reply: it.reply_en ?? '', replyEdited: false };
@@ -192,12 +212,14 @@ function stateFor(payload, previous) {
   const lastExport = samePublication ? previous.lastExport ?? null : null;
   const resendOf = samePublication ? previous.resendOf ?? null : null;
   const submit = sameRound ? previous.submit ?? null : null;
-  return { payload, decisions, sentAt, sentVia, doneAt, lastExport, resendOf, submit };
+  // Notes on the code answer one publication of the commits, as a send does.
+  const codeNotes = samePublication ? { ...(previous.codeNotes ?? {}) } : {};
+  return { payload, decisions, sentAt, sentVia, doneAt, lastExport, resendOf, submit, codeNotes };
 }
 
-/** True when the user asked the agent for a new version of at least one item. */
+/** True when the user asked the agent for a new version or for a code change on at least one item. */
 function hasRevise(state) {
-  return state.payload.items.some((it) => effective(state, it).decision === 'revise');
+  return state.payload.items.some((it) => ['revise', 'change'].includes(effective(state, it).decision));
 }
 
 /** Why and since when this pull request's triage is over, or null while it is open. */
@@ -254,7 +276,9 @@ function statusOf(state, phase, live = {}) {
       : (round1 ? 'Your turn. Decide each thread. Nothing is posted yet.' : 'Your turn. Approve the final replies. Only Publish posts.');
   } else if (phase === 'waiting') {
     who = 'agent';
-    text = !round1 ? 'Agent\'s turn. It writes the new versions you asked for. Round 2 opens here again.'
+    text = !round1 ? (Object.keys(state.codeNotes ?? {}).length
+      ? 'Agent\'s turn. It changes the code you noted and writes the new versions. Round 2 opens here again.'
+      : 'Agent\'s turn. It writes the new versions you asked for. Round 2 opens here again.')
       : review ? 'Agent\'s turn. It rewrites the comments you asked to revise. Round 2 opens here.'
         : 'Agent\'s turn. It makes the fixes and commits them, without pushing. Round 2 opens here.';
     if (state.sentVia === 'clipboard') text += ' Your decisions are on the clipboard. Paste them to the agent.';
@@ -295,8 +319,21 @@ function isNewer(serverPayload, state) {
     || (serverPayload.closed_at ?? null) !== (mine.closed_at ?? null);
 }
 
+/** One note per file of a commit and view. */
+function noteKey(n) {
+  return `${n.sha} ${n.path} ${n.view}`;
+}
+
+/** The notes on the code of the commits an item cites. Any of them locks the reply as Change code. */
+function notesFor(state, item) {
+  if (!Array.isArray(item.commits) || !item.commits.length) return [];
+  return Object.values(state.codeNotes ?? {}).filter((n) => item.commits.includes(n.sha));
+}
+
 /** The decision that counts for an item: yours, or the proposal when the agent marked it `auto` and it posts nothing. */
 function effective(state, item) {
+  // A note on the code wins over any choice. The choice stays stored and counts again once the notes are deleted.
+  if (notesFor(state, item).length) return { decision: 'change', auto: false };
   const d = state.decisions[item.thread_id];
   if (d?.decision) return { decision: d.decision, auto: false };
   const b = item.auto && item.verdict ? decisionsFor(state.payload).find((x) => x.key === item.verdict) : null;
@@ -399,6 +436,7 @@ function buildExport(state, now) {
         note: d.note,
       };
     }),
+    ...(p.changes ? { code_notes: Object.values(state.codeNotes ?? {}).map((n) => ({ ...n, thread_ids: p.items.filter((it) => (it.commits ?? []).includes(n.sha)).map((it) => it.thread_id) })) } : {}),
     ...submit,
   };
 }
@@ -834,7 +872,8 @@ function secondChairBootstrap() {
   const load = () => {
     const raw = GM_getValue(storageKey(loc.repo, loc.number), null);
     try {
-      return raw ? JSON.parse(raw) : null;
+      // A state stored before 1.2 has no notes on the code.
+      return raw ? { codeNotes: {}, ...JSON.parse(raw) } : null;
     } catch {
       return null;
     }
@@ -857,7 +896,7 @@ function secondChairBootstrap() {
   });
 
   /** Resolves { status, body } from the local server; rejects when it is not running. */
-  function api(method, path, body) {
+  function api(method, path, body, timeout = 4000) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method,
@@ -865,7 +904,7 @@ function secondChairBootstrap() {
         // The custom header is what the server checks to refuse requests a web page could forge.
         headers: { 'Content-Type': 'application/json', 'X-Second-Chair': '1' },
         data: body === undefined ? undefined : JSON.stringify(body),
-        timeout: 4000,
+        timeout,
         onload: (r) => {
           let parsed = null;
           try {
