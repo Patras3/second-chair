@@ -356,6 +356,28 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check(await p2.locator('.sc-diff').count() === 1 && await p2.locator(`${card('T2')} .sc-btn.sc-on[data-sc-val]`).count() === 0, 'Enter behind the open popup changes no decision');
   await p2.keyboard.press('Escape');
   await p2.click(`${card('T2')} [data-sc-val=hold]`);
+  // The d key with a thread selected opens that thread's commit.
+  await p2.click('.sc-row-main[data-sc-id=T2]');
+  await p2.keyboard.press('d');
+  await p2.waitForSelector('.sc-diff');
+  check((await p2.textContent('.sc-diff .sc-dhead')).includes('Commit bbbbbbb'), 'the d key opens the popup on the selected thread\'s commit');
+  // Esc in the note field cancels the edit and keeps the popup open.
+  await p2.click('.sc-diff [data-sc-act=dmark][data-sc-side=new][data-sc-n="2"]');
+  await p2.fill('.sc-diff textarea.sc-dnote', 'Draft only.');
+  await p2.press('.sc-diff textarea.sc-dnote', 'Escape');
+  check(await p2.locator('.sc-diff').count() === 1 && await p2.locator('.sc-diff textarea.sc-dnote').count() === 0, 'Esc in the note field cancels the edit but keeps the popup open');
+  // Done, a view switch and the close button keep a draft that was typed.
+  await p2.click('.sc-diff [data-sc-act=dmark][data-sc-side=new][data-sc-n="2"]');
+  await p2.fill('.sc-diff textarea.sc-dnote', 'Second note.');
+  await p2.click('.sc-diff .sc-dfootbar [data-sc-act=dclose]');
+  check(await p2.locator('.sc-diff').count() === 1 && (await p2.textContent('.sc-diff .sc-dfootbar')).includes('Save or cancel the note first'), 'Done with a typed draft keeps the popup open with the warning');
+  await p2.click('.sc-diff .sc-dhead [data-sc-act=dclose]');
+  check(await p2.locator('.sc-diff').count() === 1 && await p2.inputValue('.sc-diff textarea.sc-dnote') === 'Second note.', 'the close button keeps a typed draft too');
+  await p2.click('.sc-diff [data-sc-act=dsave]');
+  check(await p2.locator(`${card('T2')} .sc-change-on`).count() === 1, 'saving the note locks T2 as Change code');
+  await p2.click('.sc-diff [data-sc-act=ddelete]');
+  check(await p2.locator(`${card('T2')} .sc-btn.sc-on[data-sc-val=hold]`).count() === 1, 'deleting the note gives the card its earlier choice back');
+  await p2.keyboard.press('Escape');
   await p2.click('[data-sc-act=export]');
   await p2.waitForSelector('body > .sc-panel .sc-wait');
   const sentRes = await api('GET', '/api/decisions?repo=acme/w&pr=10&round=2&peek=1');
@@ -366,6 +388,7 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   // opens read only.
   await p2.click('.sc-push [data-sc-act=diff][data-sc-val=range]');
   await p2.waitForSelector('.sc-diff');
+  check(await p2.locator('.sc-diff [data-sc-act=dmark], .sc-diff [data-sc-act=dnote]').count() === 0, 'after Send the popup is read only');
   await api('PUT', '/api/proposals', { ...r2, items: r2.items.map((it) => ({ ...it })) });
   await p2.waitForSelector('.sc-diff', { state: 'detached', timeout: 15000 }).catch(() => {});
   check(await p2.locator('.sc-diff').count() === 0, 'a new round closes the popup');
