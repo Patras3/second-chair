@@ -199,3 +199,14 @@ test('a note on a commit that no reply cites locks nothing', () => {
   p.items[1].commits = [];
   assert.equal(decisionsError(rdec(all(), [note({ sha: B, path: 'src/G.java', thread_ids: [] })]), p), null);
 });
+
+test('a range note on the old name of a renamed file is accepted, a commit note is not', () => {
+  const c = changes();
+  c.commits[0].files.push(file('N.txt', { old_path: 'O.txt', status: 'R' }));
+  c.range.files.push(file('O.txt', { status: 'D', commits: [A] }), file('N.txt', { commits: [A] }));
+  const p = withoutPatches(r2({ changes: c }));
+  const ok = all({ T1: 'change' });
+  assert.equal(decisionsError(rdec(ok, [note({ path: 'O.txt', view: 'range' })]), p), null);
+  assert.equal(decisionsError(rdec(ok, [note({ path: 'N.txt', view: 'range' })]), p), null);
+  assert.match(decisionsError(rdec(ok, [note({ path: 'O.txt', view: 'commit' })]), p), /does not change/);
+});
