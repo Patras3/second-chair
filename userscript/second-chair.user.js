@@ -305,7 +305,7 @@ ${body ? `<div class="sc-dbody">${body}</div>` : ''}${foot ? `<div class="sc-dfo
       : '<span class="sc-muted">Add a note under a file to ask the agent for a change. Nothing here goes to GitHub.</span>';
   const missing = patches ? '' : `<div class="sc-dmsg">The diff needs the local server. Start it with <code>second-chair start</code>, or run <code>${esc(cmd)}</code>.</div>`;
   return `<div class="sc-diff-backdrop" data-sc-act="dclose"></div>
-<div class="sc-diff" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+<div class="sc-diff" tabindex="-1" role="dialog" aria-modal="true" aria-label="${esc(title)}">
 <div class="sc-dhead">${SC_LOGO}<div class="sc-grow"><b>${esc(title)}</b><div class="sc-muted sc-xs">${esc(sub)}</div></div><span class="sc-label sc-notpushed">not pushed</span>${safe ? `<button type="button" class="sc-btn" data-sc-act="dcopy" data-sc-val="${esc(cmd)}">Copy git command</button>` : ''}<button type="button" class="sc-icon" data-sc-act="dclose" aria-label="Close">✕</button></div>
 <div class="sc-dmain"><div class="sc-dside"><div class="sc-dsec">Commits</div>${side}<div class="sc-dsec">Files · ${files.length}</div>${files.map((f, i) => `<a class="sc-dflink" href="#sc-dfile-${i}" data-sc-act="djump" data-sc-file="${i}"><span class="sc-mono">${esc(f.path.split('/').pop())}</span><span class="sc-mono">${counts(f)}</span></a>`).join('')}</div>
 <div class="sc-dlist">${missing}${files.map(block).join('')}<div class="sc-muted sc-xs">Snapshot taken when the agent sent round 2. If the agent changes a commit, its hash changes and the card shows the new one.</div></div></div>
@@ -1118,15 +1118,39 @@ function secondChairBootstrap() {
     }
     const patches = currentPatches();
     const scroll = layer.querySelector('.sc-dlist')?.scrollTop ?? 0;
+    const hadFocus = layer.contains(document.activeElement);
     layer.innerHTML = buildDiff(state, patches, diff, locked());
     const list = layer.querySelector('.sc-dlist');
     if (list) list.scrollTop = scroll;
-    layer.querySelector('textarea.sc-dnote')?.focus({ preventScroll: true });
+    // A rebuilt popup must not drop focus on the page behind it.
+    const note = layer.querySelector('textarea.sc-dnote');
+    if (note) note.focus({ preventScroll: true });
+    else if (hadFocus) layer.querySelector('.sc-diff')?.focus({ preventScroll: true });
+  }
+
+  /** Describes the control that opened the popup, so it can be found again after a rebuild. */
+  function openerRef(el) {
+    if (!el?.dataset?.scAct) return { row: openId };
+    const card = el.closest('.sc-card');
+    return { act: el.dataset.scAct, val: el.dataset.scVal ?? '', card: card?.dataset.scCard ?? null, where: card?.dataset.scWhere ?? null, push: Boolean(el.closest('.sc-push')), cls: el.classList.contains('sc-btn') ? 'sc-btn' : el.classList.contains('sc-pushrow') ? 'sc-pushrow' : null, row: openId };
+  }
+
+  function findOpener(ref) {
+    if (!ref) return null;
+    const q = CSS.escape;
+    if (ref.act) {
+      const ctl = `[data-sc-act="${q(ref.act)}"][data-sc-val="${q(ref.val)}"]${ref.cls ? `.${ref.cls}` : ''}`;
+      const sel = ref.card ? `.sc-card[data-sc-where="${q(ref.where)}"][data-sc-card="${q(ref.card)}"] ${ctl}` : ref.push ? `.sc-push ${ctl}` : ctl;
+      const found = document.querySelector(sel);
+      if (found) return found;
+    }
+    return ref.row ? document.querySelector(`.sc-row-main[data-sc-id="${q(ref.row)}"]`) : null;
   }
 
   async function openDiff(view, opener) {
-    diff = { view, folded: {}, editing: null, draftText: '', draftLines: [], warn: null, opener };
+    diff = { view, folded: {}, editing: null, draftText: '', draftLines: [], warn: null, opener, ref: openerRef(opener) };
     renderDiff();
+    diffEl()?.querySelector('.sc-diff')?.focus({ preventScroll: true });
     const want = state.payload.published_at ?? null;
     if (patchCache?.published_at === want) return;
     try {
@@ -1140,9 +1164,11 @@ function secondChairBootstrap() {
 
   function closeDiff() {
     const opener = diff?.opener;
+    const ref = diff?.ref;
     diff = null;
     diffEl()?.remove();
-    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    const target = opener?.isConnected ? opener : findOpener(ref);
+    target?.focus({ preventScroll: true });
   }
 
   /** The file the popup's control points at, in the current view. */
@@ -1791,8 +1817,10 @@ function secondChairBootstrap() {
       e.stopImmediatePropagation();
       return;
     }
-    // Typing in the note goes on as usual; any other key stays away from the cards behind the popup.
+    // Typing in the note goes on as usual; any other key stays away from the cards behind the popup. Enter and
+    // Space on a control behind it must not fire its native click either.
     if (e.target?.matches?.('textarea.sc-dnote')) return;
+    if (!e.target?.closest?.('.sc-diff-layer')) e.preventDefault();
     e.stopImmediatePropagation();
   }, true);
 
@@ -1823,6 +1851,8 @@ function secondChairBootstrap() {
   document.addEventListener('click', async (e) => {
     const el = ownControl(e.target, '[data-sc-act]');
     if (!el) return;
+    // While the popup shows, only its own controls act.
+    if (diff && !el.closest('.sc-diff-layer, .sc-tour')) return;
     const act = el.dataset.scAct;
     const id = el.dataset.scId;
     // A link inside the shown text still opens; only a click on the text itself starts editing.

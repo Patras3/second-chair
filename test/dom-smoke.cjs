@@ -341,6 +341,20 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   await p2.keyboard.press('1');
   await p2.keyboard.press('5');
   check(await p2.locator(`${card('T1')} .sc-change-on`).count() === 1 && await p2.locator(`${card('T1')} .sc-btn.sc-on[data-sc-val]`).count() === 0, 'number keys change nothing on a locked card, and 5 is no key');
+  // Focus returns to the control that opened the popup, even though saving rebuilt the card.
+  await p2.click(`${card('T1')} .sc-btn[data-sc-act=diff]`);
+  await p2.waitForSelector('.sc-diff');
+  await p2.click('.sc-diff [data-sc-act=dnote]');
+  await p2.click('.sc-diff [data-sc-act=dsave]');
+  await p2.keyboard.press('Escape');
+  check(await p2.locator('.sc-diff').count() === 0 && await p2.evaluate(() => document.activeElement?.matches('.sc-card[data-sc-where=inline][data-sc-card=T1] .sc-btn[data-sc-act=diff]')), 'closing returns focus to the View changes button, also after a save');
+  // A control behind the popup keeps working only if the popup lets its keys through: Enter must not decide.
+  await p2.click(`${card('T2')} [data-sc-act=diff]`);
+  await p2.waitForSelector('.sc-diff');
+  await p2.evaluate(() => document.querySelector('.sc-card[data-sc-where=inline][data-sc-card=T2] [data-sc-val=hold]').focus());
+  await p2.keyboard.press('Enter');
+  check(await p2.locator('.sc-diff').count() === 1 && await p2.locator(`${card('T2')} .sc-btn.sc-on[data-sc-val]`).count() === 0, 'Enter behind the open popup changes no decision');
+  await p2.keyboard.press('Escape');
   await p2.click(`${card('T2')} [data-sc-val=hold]`);
   await p2.click('[data-sc-act=export]');
   await p2.waitForSelector('body > .sc-panel .sc-wait');
