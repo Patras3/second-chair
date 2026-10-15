@@ -643,7 +643,18 @@ function buildCard(state, item, where, view = {}) {
   }
   const context = [field(item, 'context'), field(item, 'fix') ? `**Plan:** ${field(item, 'fix')}` : ''].filter(Boolean).join('\n\n');
   const summary = field(item, 'summary');
-  const commits = Array.isArray(item.commits) && item.commits.length ? `<div class="sc-commits">Commits: ${item.commits.map(shortCommit).join(' ')}</div>` : '';
+  const ch = p.changes;
+  const commitRow = (sha) => {
+    const k = ch?.commits.find((x) => x.sha === sha);
+    if (!k) return shortCommit(sha);
+    const n = notesFor(state, { commits: [sha] }).length;
+    return `<div class="sc-crow">${shortCommit(sha).replace('<code', '<code class="sc-sha"')}<span class="sc-grow sc-ellip">${esc(k.subject)}</span><span class="sc-mono">${countsHtml(k)} · ${plural(k.files.length, 'file', 'files')}</span><span class="sc-label sc-notpushed">not pushed</span>${n ? `<span class="sc-label sc-change">${plural(n, 'note', 'notes')}</span>` : ''}<button type="button" class="sc-btn" data-sc-act="diff" data-sc-val="${esc(sha)}">View changes</button></div>`;
+  };
+  const commits = Array.isArray(item.commits) && item.commits.length
+    ? (ch ? item.commits.map(commitRow).join('') : `<div class="sc-commits">Commits: ${item.commits.map(shortCommit).join(' ')}</div>`)
+    : '';
+  const notes = notesFor(state, item);
+  const changeBox = notes.length ? `<div class="sc-changebox"><div class="sc-drow"><span class="sc-label sc-change">Change code</span><b>${plural(notes.length, 'note', 'notes')} on the code</b><span class="sc-muted sc-xs">for the agent · never posted</span><span class="sc-grow"></span><button type="button" class="sc-link" data-sc-act="diff" data-sc-val="${esc(notes[0].view === 'range' ? 'range' : notes[0].sha)}">Open in diff</button></div>${notes.map((n) => `<div class="sc-cnote"><span class="sc-mono">${esc(n.path.split('/').pop())}</span>${n.lines.length ? ` <span class="sc-chip">${esc(markLabel(n.lines))}</span>` : ''}<div>${richText(n.text)}</div></div>`).join('')}</div>` : '';
   const needNote = missingNote(state, item);
   // The box shows the text as GitHub will show it. Edit swaps in a textarea; the user's text then wins.
   const editable = !view.readOnly;
@@ -664,16 +675,17 @@ function buildCard(state, item, where, view = {}) {
     : `<button type="button" class="sc-link" data-sc-act="edit" data-sc-id="${id}" title="Change the text. Your text replaces the agent's.">✎ Edit</button>`;
   const original = (item.origin === 'user' || item.origin === 'earlier') && item.original_en && item.original_en !== d.reply
     ? `<details class="sc-original"><summary>${item.origin === 'earlier' ? 'Earlier text' : 'Your original'}</summary><div class="sc-md markdown-body">${renderMarkdown(item.original_en)}</div></details>` : '';
+  const lockedByNotes = notes.length > 0;
   const buttons = choicesFor(p).map((b, i) => {
     const bc = ['sc-btn'];
-    if (d.decision === b.key) bc.push('sc-on');
-    else if (e.auto && e.decision === b.key) bc.push('sc-on-auto');
-    else if (!e.decision && item.verdict === b.key) bc.push('sc-suggested');
-    return `<button type="button" class="${bc.join(' ')}" data-sc-act="decide" data-sc-id="${id}" data-sc-val="${b.key}" title="${esc(b.help)} (key ${i + 1})">${d.decision === b.key ? '✓ ' : ''}${esc(b.label)}</button>`;
-  }).join('');
+    if (!lockedByNotes && d.decision === b.key) bc.push('sc-on');
+    else if (!lockedByNotes && e.auto && e.decision === b.key) bc.push('sc-on-auto');
+    else if (!lockedByNotes && !e.decision && item.verdict === b.key) bc.push('sc-suggested');
+    return `<button type="button" class="${bc.join(' ')}" data-sc-act="decide" data-sc-id="${id}" data-sc-val="${b.key}" title="${esc(b.help)} (key ${i + 1})"${lockedByNotes ? ' disabled' : ''}>${!lockedByNotes && d.decision === b.key ? '✓ ' : ''}${esc(b.label)}</button>`;
+  }).join('') + (lockedByNotes ? `<button type="button" class="sc-btn sc-on sc-change-on" aria-pressed="true" disabled>✓ ${esc(decisionLabel(p, 'change'))}</button>` : '');
   const footer = view.readOnly
     ? `<div class="sc-card-foot"><span class="sc-muted">Decision:</span> <b>${esc(e.decision ? decisionLabel(p, e.decision) : 'none')}</b></div>`
-    : `<div class="sc-card-foot"><div class="sc-seg">${buttons}</div><input class="sc-note${needNote ? ' sc-note-needed' : ''}" data-sc-field="note" data-sc-id="${id}" placeholder="${needNote ? 'What should change? Revise needs a note' : 'Note for the agent (optional)'}" value="${esc(d.note)}"></div>`;
+    : `<div class="sc-card-foot"><div class="sc-seg">${buttons}</div><input class="sc-note${needNote ? ' sc-note-needed' : ''}" data-sc-field="note" data-sc-id="${id}" placeholder="${needNote ? 'What should change? Revise needs a note' : lockedByNotes ? 'Note on the reply text (optional)' : 'Note for the agent (optional)'}" value="${esc(d.note)}">${lockedByNotes ? '<div class="sc-xs sc-muted sc-lockline">Locked while the code note exists. The agent changes the code, and you decide the reply again on the new commit. Delete the note in the diff to unlock.</div>' : ''}</div>`;
   const expander = e.auto || view.sent || view.done ? `<button type="button" class="sc-link" data-sc-act="expand" data-sc-id="${id}">collapse</button>` : '';
   return `${open}
   <div class="sc-card-head">${mark}${who}${verdictLabel}${hidden}<span class="sc-head-right">${pos}${moves}${jump}${expander}</span></div>
@@ -684,6 +696,7 @@ function buildCard(state, item, where, view = {}) {
     <div class="sc-caption"><span>${caption}${d.replyEdited ? ' <span class="sc-edited">· edited by you</span>' : ''}</span><span class="sc-caption-tools">${undo}${tool}</span></div>
     ${onPage ? '' : `<div class="sc-reply-box${editingNow ? ' sc-editing' : ''}">${reply}</div>`}
     ${original}
+    ${changeBox}
   </div>
   ${footer}
 </div>`;
@@ -748,7 +761,7 @@ function buildPanelList(state, openId, filterKey, viewOf) {
     const v = viewOf(it);
     const { decided, icon, label } = rowParts(state, it, v);
     // A review comment has no author to show; only an item without a file is general.
-    const meta = [it.author ? esc(it.author) : (it.path ? '' : 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', v.hidden ? `<span class="sc-hidden">${modeOf(p) === 'review' ? 'folded on GitHub · decide here' : 'not loaded on page'}</span>` : '', Array.isArray(it.commits) && it.commits.length ? `commit ${shortCommit(it.commits[0])}` : ''].filter(Boolean).join(' · ');
+    const meta = [it.author ? esc(it.author) : (it.path ? '' : 'general'), it.line ? `line ${esc(it.line)}` : '', !e.decision && it.verdict ? `proposed ${esc(decisionLabel(p, it.verdict))}` : '', notesFor(state, it).length ? `<span class="sc-change-text">Change code · ${plural(notesFor(state, it).length, 'note', 'notes')}</span>` : '', v.hidden ? `<span class="sc-hidden">${modeOf(p) === 'review' ? 'folded on GitHub · decide here' : 'not loaded on page'}</span>` : '', Array.isArray(it.commits) && it.commits.length ? `commit ${shortCommit(it.commits[0])}` : ''].filter(Boolean).join(' · ');
     const open = it.thread_id === openId;
     return `<div class="sc-row${decided ? ' sc-decided' : ''}${open ? ' sc-selected' : ''}" data-sc-item="${esc(it.thread_id)}">
   <div class="sc-row-main" data-sc-act="toggle" data-sc-id="${esc(it.thread_id)}">${icon}<div class="sc-row-text"><div class="sc-row-sum">${richText(field(it, 'summary') || String(it.reply_en ?? '').split('\n')[0])}</div><div class="sc-row-meta">${meta}</div></div>${label}</div>
@@ -762,6 +775,16 @@ function buildFilterBar(state, filterKey) {
   const tabs = SC_FILTERS.map((f) => `<button type="button" class="sc-ftab${f.key === filterKey ? ' sc-ftab-on' : ''}" data-sc-act="filter" data-sc-val="${f.key}">${esc(f.label)}<b>${count(f.test)}</b></button>`).join('');
   const options = choicesFor(state.payload).map((b) => `<option value="d:${b.key}"${`d:${b.key}` === filterKey ? ' selected' : ''}>${esc(b.label)} (${count((e) => e.decision === b.key)})</option>`).join('');
   return `<div class="sc-tabbar">${tabs}<select class="sc-fdecision" data-sc-act="filterselect"><option value="">Decision</option>${options}</select></div>`;
+}
+
+/** The folded row above the tabs: what `git push` will send, and a way into the diff. */
+function buildPushRow(state, open) {
+  const ch = state.payload.changes;
+  if (!ch) return '';
+  const cited = new Set(state.payload.items.flatMap((it) => it.commits ?? []));
+  const orphans = Object.values(state.codeNotes ?? {}).filter((n) => !cited.has(n.sha)).length;
+  const rows = open ? `<div class="sc-pushlist">${ch.commits.map((k) => `<button type="button" class="sc-pushrow" data-sc-act="diff" data-sc-val="${esc(k.sha)}"><code class="sc-sha">${esc(k.sha.slice(0, 7))}</code><span class="sc-grow sc-ellip">${esc(k.subject)}</span><span class="sc-mono">${countsHtml(k)}</span></button>`).join('')}<div class="sc-xs sc-muted">from <code>${esc(ch.base.slice(0, 7))}</code> (PR head) to <code>${esc(ch.head.slice(0, 7))}</code> (local)</div></div>` : '';
+  return `<div class="sc-push"><div class="sc-drow"><button type="button" class="sc-icon" data-sc-act="pushfold" aria-expanded="${open}" aria-label="Show the commits">${open ? '▾' : '▸'}</button><b>Push will send</b><span class="sc-muted">${plural(ch.commits.length, 'commit', 'commits')}</span><span class="sc-mono">${countsHtml(ch)}</span><span class="sc-grow"></span><button type="button" class="sc-btn" data-sc-act="diff" data-sc-val="range">View</button></div>${orphans ? `<div class="sc-xs sc-change-text">${plural(orphans, 'note', 'notes')} on a commit no reply cites</div>` : ''}${rows}</div>`;
 }
 
 // The tour for each screen: a few steps, each pointing at a part of Second Chair's own cards or panel, never at
@@ -1017,6 +1040,16 @@ span.sc-dnums{cursor:default}
 .sc-mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
 .sc-xs{font-size:12px}
 .sc-diff .sc-err{color:var(--fgColor-danger,#d1242f);font-weight:600}
+.sc-crow{display:flex;align-items:center;gap:8px;border:1px solid var(--sc-border);border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:13px}
+.sc-ellip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sc-changebox{border:1px solid var(--borderColor-done-emphasis,#8250df);border-radius:6px;background:var(--bgColor-done-muted,#fbefff);padding:8px 12px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
+.sc-change{color:var(--fgColor-done,#8250df);border-color:var(--fgColor-done,#8250df)}
+.sc-change-text{color:var(--fgColor-done,#8250df);font-weight:600}
+.sc-change-on{background:var(--fgColor-done,#8250df);border-color:var(--fgColor-done,#8250df);color:#fff}
+.sc-lockline{flex-basis:100%}
+.sc-push{margin:8px 12px 4px;border:1px solid var(--borderColor-attention-emphasis,#d4a72c);border-radius:8px;background:var(--bgColor-attention-muted,#fff8c5);padding:4px 8px;font-size:13px}
+.sc-pushlist{display:flex;flex-direction:column;border-top:1px solid var(--borderColor-attention-emphasis,#d4a72c);margin-top:4px;padding-top:4px}
+.sc-pushrow{display:flex;gap:8px;align-items:center;font:inherit;font-size:13px;color:inherit;background:none;border:0;padding:4px 6px;cursor:pointer;text-align:left}
 `;
 
 function secondChairBootstrap() {
@@ -1193,7 +1226,7 @@ function secondChairBootstrap() {
     // Without proposals the panel explains how to start; it carries its own paste box when the server is down.
     const empty = state ? '' : emptyPanel(loc, serverUp);
     const paste = message?.showPaste && !(empty && serverUp === false) ? '<textarea class="sc-paste" placeholder="Or paste the proposals JSON here (Ctrl+V)"></textarea>' : '';
-    const keys = state ? `<div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${choicesFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit</div>` : '';
+    const keys = state ? `<div class="sc-keys"><kbd>j</kbd> <kbd>k</kbd> move <kbd>Enter</kbd> expand <kbd>1</kbd>–<kbd>${choicesFor(state.payload).length}</kbd> decide <kbd>e</kbd> edit${state.payload.changes ? ' <kbd>d</kbd> changes' : ''}</div>` : '';
     let foot = '';
     if (ph === 'decide') {
       foot = `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete && !lock ? '' : 'disabled'}>${sendLabel(pr)}</button><div class="sc-lock"${lock ? '' : ' hidden'}>${esc(lock ?? '')}</div>${keys}</div>`;
@@ -1205,7 +1238,7 @@ function secondChairBootstrap() {
     } else if (ph === 'done') {
       foot = '<div class="sc-panel-foot sc-muted sc-small">Read only. A new proposal from the agent reopens this pull request.</div>';
     }
-    panel.innerHTML = `${head}${menu}${banner}${state ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${empty}${state ? buildYourReview(state, body ? viewOf(body) : {}) + buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
+    panel.innerHTML = `${head}${menu}${banner}${state ? buildPushRow(state, Boolean(ui.pushOpen)) : ''}${state ? buildFilterBar(state, ui.filter) : ''}${msg}${paste}<div class="sc-list">${empty}${state ? buildYourReview(state, body ? viewOf(body) : {}) + buildPanelList(state, openId, ui.filter, viewOf) : ''}</div>${foot}`;
     panel.querySelector('.sc-list').scrollTop = scrollTop;
     applyLayout();
   }

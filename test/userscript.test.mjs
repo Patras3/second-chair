@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor', 'notesFor', 'noteKey', 'withoutPatches', 'hasPatches', 'splitPatches', 'parsePatch', 'markLabel', 'noteTarget', 'isLargeFile', 'diffFiles', 'isSafeSha', 'buildDiff'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor, notesFor, noteKey, withoutPatches, hasPatches, splitPatches, parsePatch, markLabel, noteTarget, isLargeFile, diffFiles, isSafeSha, buildDiff } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'buildPushRow', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor', 'notesFor', 'noteKey', 'withoutPatches', 'hasPatches', 'splitPatches', 'parsePatch', 'markLabel', 'noteTarget', 'isLargeFile', 'diffFiles', 'isSafeSha', 'buildDiff'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, buildPushRow, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor, notesFor, noteKey, withoutPatches, hasPatches, splitPatches, parsePatch, markLabel, noteTarget, isLargeFile, diffFiles, isSafeSha, buildDiff } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -919,4 +919,47 @@ test('a saved range note says which commit it goes to when several commits chang
   const n = { sha: SH, path: 'f', view: 'range', lines: [], text: 'Rework this.' };
   s.codeNotes[noteKey(n)] = n;
   assert.match(buildDiff(s, p, popup(), false), /Goes to bbbbbbb/);
+});
+
+test('a cited commit shows as a row with its counts and a View changes button', () => {
+  const s = stateFor(r2(), null);
+  const html = buildCard(s, s.payload.items[0], 'inline', {});
+  assert.match(html, /<code class="sc-sha"[^>]*>aaaaaaa<\/code>/);
+  assert.match(html, /data-sc-act="diff" data-sc-val="a{40}"/);
+  assert.match(html, /not pushed/);
+});
+
+test('a reply with a note shows Change code, the note, and locked buttons', () => {
+  const s = stateFor(r2(), null);
+  s.codeNotes[noteKey(noteA)] = noteA;
+  const html = buildCard(s, s.payload.items[0], 'inline', {});
+  assert.match(html, /sc-change">Change code<\/span><b>1 note on the code<\/b>/);
+  assert.match(html, /Not like this\./);
+  assert.match(html, /<span class="sc-chip">L3<\/span>/);
+  assert.match(html, /data-sc-val="publish"[^>]*disabled/);
+  assert.match(html, /Locked while the code note exists/);
+  assert.match(html, /placeholder="Note on the reply text \(optional\)"/);
+});
+
+test('the push row is folded by default and lists the commits when open', () => {
+  const s = stateFor(r2(), null);
+  const folded = buildPushRow(s, false);
+  assert.match(folded, /Push will send/);
+  assert.match(folded, /2 commits/);
+  assert.doesNotMatch(folded, /data-sc-val="a{40}"/);
+  assert.match(buildPushRow(s, true), /data-sc-act="diff" data-sc-val="a{40}"/);
+  assert.equal(buildPushRow(stateFor(r2({ changes: undefined }), null), true), '');
+});
+
+test('a note on a commit no reply cites is named in the push row', () => {
+  const s = stateFor(r2(), null);
+  s.payload.items[1].commits = [];
+  s.codeNotes[noteKey({ ...noteA, sha: SB, path: 'g' })] = { ...noteA, sha: SB, path: 'g' };
+  assert.match(buildPushRow(s, false), /1 note on a commit no reply cites/);
+});
+
+test('the panel row of a locked reply says Change code', () => {
+  const s = stateFor(r2(), null);
+  s.codeNotes[noteKey(noteA)] = noteA;
+  assert.match(buildPanelList(s, null, 'all', () => ({})), /Change code · 1 note/);
 });
