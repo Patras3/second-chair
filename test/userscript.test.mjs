@@ -963,3 +963,13 @@ test('the panel row of a locked reply says Change code', () => {
   s.codeNotes[noteKey(noteA)] = noteA;
   assert.match(buildPanelList(s, null, 'all', () => ({})), /Change code · 1 note/);
 });
+
+test('each note in the Change code box has its own Open in diff, range notes open the range', () => {
+  const s = stateFor(r2(), null);
+  const range = { ...noteA, path: 'other.txt', view: 'range' };
+  s.codeNotes[noteKey(noteA)] = noteA;
+  s.codeNotes[noteKey(range)] = range;
+  const html = buildCard(s, s.payload.items[0], 'inline', {});
+  const links = [...html.matchAll(/data-sc-act="diff" data-sc-val="([^"]+)">Open in diff/g)].map((m) => m[1]);
+  assert.deepEqual(links, [noteA.view === 'range' ? 'range' : noteA.sha, 'range']);
+});

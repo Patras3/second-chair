@@ -654,7 +654,7 @@ function buildCard(state, item, where, view = {}) {
     ? (ch ? item.commits.map(commitRow).join('') : `<div class="sc-commits">Commits: ${item.commits.map(shortCommit).join(' ')}</div>`)
     : '';
   const notes = notesFor(state, item);
-  const changeBox = notes.length ? `<div class="sc-changebox"><div class="sc-drow"><span class="sc-label sc-change">Change code</span><b>${plural(notes.length, 'note', 'notes')} on the code</b><span class="sc-muted sc-xs">for the agent · never posted</span><span class="sc-grow"></span><button type="button" class="sc-link" data-sc-act="diff" data-sc-val="${esc(notes[0].view === 'range' ? 'range' : notes[0].sha)}">Open in diff</button></div>${notes.map((n) => `<div class="sc-cnote"><span class="sc-mono">${esc(n.path.split('/').pop())}</span>${n.lines.length ? ` <span class="sc-chip">${esc(markLabel(n.lines))}</span>` : ''}<div>${richText(n.text)}</div></div>`).join('')}</div>` : '';
+  const changeBox = notes.length ? `<div class="sc-changebox"><div class="sc-drow"><span class="sc-label sc-change">Change code</span><b>${plural(notes.length, 'note', 'notes')} on the code</b><span class="sc-muted sc-xs">for the agent · never posted</span></div>${notes.map((n) => `<div class="sc-cnote"><div class="sc-drow"><span class="sc-mono">${esc(n.path.split('/').pop())}</span>${n.lines.length ? ` <span class="sc-chip">${esc(markLabel(n.lines))}</span>` : ''}<span class="sc-grow"></span><button type="button" class="sc-link" data-sc-act="diff" data-sc-val="${esc(n.view === 'range' ? 'range' : n.sha)}">Open in diff</button></div><div>${richText(n.text)}</div></div>`).join('')}</div>` : '';
   const needNote = missingNote(state, item);
   // The box shows the text as GitHub will show it. Edit swaps in a textarea; the user's text then wins.
   const editable = !view.readOnly;
@@ -1106,6 +1106,12 @@ function secondChairBootstrap() {
   const diffEl = () => document.body.querySelector(':scope > .sc-diff-layer');
   // The patches of the loaded publication, or null. renderDiff and diffFile must agree on this, or a file index
   // would point at another list.
+  // A note being written has text that no other click may throw away.
+  const unsavedNote = () => !!(diff?.editing && diff.draftText.trim());
+  const warnUnsaved = () => {
+    diff.warn = 'Save or cancel the note first.';
+    renderDiff();
+  };
   const currentPatches = () => (patchCache && state && patchCache.published_at === (state.payload.published_at ?? null) ? patchCache.changes : null);
 
   function renderDiff() {
@@ -1431,6 +1437,8 @@ function secondChairBootstrap() {
       const before = state ? { round: state.payload.round, published: state.payload.published_at ?? null, phase: phase() } : null;
       const split = splitPatches(res.payload);
       if (split.patches) patchCache = { published_at: res.payload.published_at ?? null, changes: split.patches };
+      // Patches left over from an older paste must not match a payload that has none.
+      else if ((res.payload.published_at ?? null) === null) patchCache = null;
       res.payload = split.payload;
       state = stateFor(res.payload, state);
       if (diff && before?.published !== (res.payload.published_at ?? null)) closeDiff();
@@ -1950,14 +1958,13 @@ function secondChairBootstrap() {
       renderPanel();
     } else if (act === 'dclose') {
       if (!diff) return;
-      // A backdrop click must not lose a note being written.
-      if (diff.editing && diff.draftText.trim() && el.classList.contains('sc-diff-backdrop')) {
-        diff.warn = 'Save or cancel the note first.';
-        renderDiff();
-        return;
+      // Closing, by the backdrop, the close button or Done, must not lose a note being written.
+      if (unsavedNote()) {
+        return warnUnsaved();
       }
       closeDiff();
     } else if (act === 'dview') {
+      if (unsavedNote()) return warnUnsaved();
       const v = el.dataset.scVal;
       Object.assign(diff, { view: v === 'range' ? { kind: 'range' } : { kind: 'commit', sha: v }, editing: null, draftText: '', draftLines: [], warn: null });
       renderDiff();
@@ -1974,6 +1981,7 @@ function secondChairBootstrap() {
       const sha = noteTarget(state.payload.changes, diff.view, f.path);
       const key = noteKey({ sha, path: f.path, view: diff.view.kind });
       if (diff.editing !== key) {
+        if (unsavedNote()) return warnUnsaved();
         const old = state.codeNotes[key];
         Object.assign(diff, { editing: key, draftText: old?.text ?? '', draftLines: [...(old?.lines ?? [])], warn: null });
       }
