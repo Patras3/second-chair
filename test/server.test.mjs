@@ -211,6 +211,17 @@ test('the patches are stored apart and served on /api/changes', async () => {
   assert.equal((await call('GET', '/api/changes?repo=acme/ch&pr=9&round=1')).status, 404);
 });
 
+test('a published_at sent inside changes does not override the server time', async () => {
+  const forged = withChanges();
+  forged.changes.published_at = '1999-01-01';
+  assert.equal((await call('PUT', '/api/proposals', forged)).status, 200);
+  const p = await call('GET', '/api/proposals?repo=acme/ch&pr=9');
+  const c = await call('GET', '/api/changes?repo=acme/ch&pr=9&round=2');
+  assert.equal(c.status, 200);
+  assert.notEqual(p.body.published_at, '1999-01-01');
+  assert.equal(c.body.published_at, p.body.published_at);
+});
+
 test('new proposals without changes remove the old patches, and a round 1 removes all of them', async () => {
   await call('PUT', '/api/proposals', withChanges());
   const lean = withChanges();
