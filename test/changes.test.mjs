@@ -139,3 +139,19 @@ test('resolveCommits turns unique prefixes into full shas and refuses the rest',
   const twin = { ...c, commits: [...c.commits, { ...c.commits[0], sha: `${c1.slice(0, 7)}${'0'.repeat(33)}` }] };
   assert.throws(() => resolveCommits([{ thread_id: 'T1', commits: [c1.slice(0, 7)] }], twin), /ambiguous/);
 });
+
+test('a file name that contains a tab is read whole', async (t) => {
+  const d = await mkdtemp(join(tmpdir(), 'sc-tab-'));
+  try {
+    const g = (...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8' }).trim();
+    g('init', '-q', '-b', 'main');
+    await writeFile(join(d, 'seed.txt'), 's\n');
+    g('add', '.'); g('commit', '-qm', 'seed');
+    const b = g('rev-parse', 'HEAD');
+    try { await writeFile(join(d, 'a\tb.txt'), 'x\n'); } catch { return t.skip('this filesystem refuses a tab in a file name'); }
+    g('add', '.'); g('commit', '-qm', 'tab');
+    const c = await collectChanges({ cwd: d, base: b, head: g('rev-parse', 'HEAD') });
+    assert.deepEqual(c.range.files.map((f) => f.path), ['a\tb.txt']);
+    assert.deepEqual(c.commits[0].files.map((f) => f.path), ['a\tb.txt']);
+  } finally { await rm(d, { recursive: true, force: true }); }
+});
