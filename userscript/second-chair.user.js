@@ -1083,6 +1083,9 @@ function secondChairBootstrap() {
   // The live tour: its steps, the one shown, and the overlay. A tour starts once per screen it explains.
   let tour = null;
   const toursTried = new Set();
+  // The diff popup: null when closed. `patchCache` holds the /api/changes body for the loaded publication.
+  let diff = null;
+  let patchCache = null;
 
   const load = () => {
     const raw = GM_getValue(storageKey(loc.repo, loc.number), null);
@@ -1099,6 +1102,51 @@ function secondChairBootstrap() {
   const locked = () => phase() !== 'decide';
   let showDoneCards = false;
   const itemById = (id) => state.payload.items.find((x) => x.thread_id === id);
+
+  const diffEl = () => document.body.querySelector(':scope > .sc-diff-layer');
+  // The patches of the loaded publication, or null. renderDiff and diffFile must agree on this, or a file index
+  // would point at another list.
+  const currentPatches = () => (patchCache && state && patchCache.published_at === (state.payload.published_at ?? null) ? patchCache.changes : null);
+
+  function renderDiff() {
+    if (!diff || !state?.payload.changes) return;
+    let layer = diffEl();
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 'sc-diff-layer';
+      document.body.appendChild(layer);
+    }
+    const patches = currentPatches();
+    const scroll = layer.querySelector('.sc-dlist')?.scrollTop ?? 0;
+    layer.innerHTML = buildDiff(state, patches, diff, locked());
+    const list = layer.querySelector('.sc-dlist');
+    if (list) list.scrollTop = scroll;
+    layer.querySelector('textarea.sc-dnote')?.focus({ preventScroll: true });
+  }
+
+  async function openDiff(view, opener) {
+    diff = { view, folded: {}, editing: null, draftText: '', draftLines: [], warn: null, opener };
+    renderDiff();
+    const want = state.payload.published_at ?? null;
+    if (patchCache?.published_at === want) return;
+    try {
+      const r = await api('GET', `/api/changes?repo=${encodeURIComponent(loc.repo)}&pr=${loc.number}&round=${state.payload.round}`, undefined, 30000);
+      if (r.status === 200 && (r.body.published_at ?? null) === want) patchCache = { published_at: want, changes: r.body };
+    } catch {
+      // The popup shows the counts and the git command without the server.
+    }
+    renderDiff();
+  }
+
+  function closeDiff() {
+    const opener = diff?.opener;
+    diff = null;
+    diffEl()?.remove();
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+  }
+
+  /** The file the popup's control points at, in the current view. */
+  const diffFile = (el) => diffFiles(currentPatches() ?? state.payload.changes, diff.view)[Number(el.dataset.scFile)];
   const viewOf = (it) => ({
     expanded: expanded.has(it.thread_id),
     panelOpen: panelOpen.has(it.thread_id),
@@ -1355,7 +1403,11 @@ function secondChairBootstrap() {
       message = { error: true, text: `These proposals are for ${res.payload.repo}#${res.payload.pr}, and this page is ${loc.repo}#${loc.number}.`, showPaste: true };
     } else {
       const before = state ? { round: state.payload.round, published: state.payload.published_at ?? null, phase: phase() } : null;
+      const split = splitPatches(res.payload);
+      if (split.patches) patchCache = { published_at: res.payload.published_at ?? null, changes: split.patches };
+      res.payload = split.payload;
       state = stateFor(res.payload, state);
+      if (diff && before?.published !== (res.payload.published_at ?? null)) closeDiff();
       save();
       const ph = phase();
       if (ph === 'done' && before?.phase !== 'done') showDoneCards = false;
@@ -1569,7 +1621,7 @@ function secondChairBootstrap() {
   /** The element of a Second Chair control, or null for anything the page or a payload's markdown put there. */
   function ownControl(target, selector) {
     const el = target?.closest?.(selector);
-    if (!el || !el.closest('.sc-card, .sc-panel, .sc-toggle, .sc-tour') || el.closest('.sc-md')) return null;
+    if (!el || !el.closest('.sc-card, .sc-panel, .sc-toggle, .sc-tour, .sc-diff-layer') || el.closest('.sc-md')) return null;
     return el;
   }
 
@@ -1729,6 +1781,21 @@ function secondChairBootstrap() {
   addEventListener('resize', () => placeTour());
   addEventListener('scroll', () => placeTour(), true);
 
+  // The popup owns the keyboard while it shows. Esc ends the note being written, or closes the popup.
+  document.addEventListener('keydown', (e) => {
+    if (!diff || tour) return;
+    if (e.key === 'Escape') {
+      if (diff.editing) Object.assign(diff, { editing: null, draftText: '', draftLines: [], warn: null }), renderDiff();
+      else closeDiff();
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    // Typing in the note goes on as usual; any other key stays away from the cards behind the popup.
+    if (e.target?.matches?.('textarea.sc-dnote')) return;
+    e.stopImmediatePropagation();
+  }, true);
+
   // Keys belong to the tour while it shows: arrows and Enter move, Esc ends it.
   document.addEventListener('keydown', (e) => {
     if (!tour) return;
@@ -1843,6 +1910,79 @@ function secondChairBootstrap() {
       save();
       stopPoll();
       renderAll(true);
+    } else if (act === 'diff') {
+      if (!state?.payload.changes) return;
+      const v = el.dataset.scVal;
+      openDiff(v === 'range' ? { kind: 'range' } : { kind: 'commit', sha: v }, el);
+    } else if (act === 'pushfold') {
+      ui.pushOpen = !ui.pushOpen;
+      saveUi();
+      renderPanel();
+    } else if (act === 'dclose') {
+      if (!diff) return;
+      // A backdrop click must not lose a note being written.
+      if (diff.editing && diff.draftText.trim() && el.classList.contains('sc-diff-backdrop')) {
+        diff.warn = 'Save or cancel the note first.';
+        renderDiff();
+        return;
+      }
+      closeDiff();
+    } else if (act === 'dview') {
+      const v = el.dataset.scVal;
+      Object.assign(diff, { view: v === 'range' ? { kind: 'range' } : { kind: 'commit', sha: v }, editing: null, draftText: '', draftLines: [], warn: null });
+      renderDiff();
+    } else if (act === 'dfold') {
+      const f = diffFile(el);
+      const now = diff.folded[f.path] ?? isLargeFile(f);
+      diff.folded[f.path] = !now;
+      renderDiff();
+    } else if (act === 'djump') {
+      diffEl()?.querySelector(`#sc-dfile-${Number(el.dataset.scFile)}`)?.scrollIntoView({ block: 'start' });
+    } else if (act === 'dnote' || act === 'dmark') {
+      if (locked()) return;
+      const f = diffFile(el);
+      const sha = noteTarget(state.payload.changes, diff.view, f.path);
+      const key = noteKey({ sha, path: f.path, view: diff.view.kind });
+      if (diff.editing !== key) {
+        const old = state.codeNotes[key];
+        Object.assign(diff, { editing: key, draftText: old?.text ?? '', draftLines: [...(old?.lines ?? [])], warn: null });
+      }
+      if (act === 'dmark') {
+        const side = el.dataset.scSide;
+        const n = Number(el.dataset.scN);
+        const at = diff.draftLines.findIndex((l) => l.side === side && l.n === n);
+        if (at >= 0) diff.draftLines.splice(at, 1);
+        else diff.draftLines.push({ side, n });
+      }
+      renderDiff();
+    } else if (act === 'dclearmarks') {
+      diff.draftLines = [];
+      renderDiff();
+    } else if (act === 'dcancel') {
+      Object.assign(diff, { editing: null, draftText: '', draftLines: [], warn: null });
+      renderDiff();
+    } else if (act === 'dsave') {
+      if (locked() || !diff.editing) return;
+      const f = diffFile(el);
+      const sha = noteTarget(state.payload.changes, diff.view, f.path);
+      const key = diff.editing;
+      if (diff.draftText.trim()) state.codeNotes[key] = { sha, path: f.path, view: diff.view.kind, lines: diff.draftLines, text: diff.draftText.trim() };
+      else delete state.codeNotes[key];
+      Object.assign(diff, { editing: null, draftText: '', draftLines: [], warn: null });
+      save();
+      // A note locks or unlocks cards that already exist. renderAll(false) only adds missing cards, so rebuild.
+      renderAll(true);
+      renderDiff();
+    } else if (act === 'ddelete') {
+      if (locked()) return;
+      const f = diffFile(el);
+      delete state.codeNotes[noteKey({ sha: noteTarget(state.payload.changes, diff.view, f.path), path: f.path, view: diff.view.kind })];
+      save();
+      renderAll(true);
+      renderDiff();
+    } else if (act === 'dcopy') {
+      const cmd = el.dataset.scVal;
+      if (/^git (show [0-9a-f]{40}|log -p [0-9a-f]{40}\.\.[0-9a-f]{40})$/.test(cmd)) GM_setClipboard(cmd);
     } else if (act === 'clear') {
       if (!confirm('Remove the proposals and decisions for this PR from this browser?')) return;
       GM_deleteValue(storageKey(loc.repo, loc.number));
@@ -1880,7 +2020,7 @@ function secondChairBootstrap() {
     } else if (act === 'decide') {
       const d = state?.decisions[id];
       const key = el.dataset.scVal;
-      if (!d || locked() || !choicesFor(state.payload).some((b) => b.key === key)) return;
+      if (!d || locked() || notesFor(state, itemById(id)).length || !choicesFor(state.payload).some((b) => b.key === key)) return;
       d.decision = d.decision === key ? null : key;
       save();
       refreshThread(id);
@@ -1919,7 +2059,7 @@ function secondChairBootstrap() {
       refreshThread(openId);
     } else if (openId && /^[1-9]$/.test(e.key)) {
       const b = choicesFor(state.payload)[Number(e.key) - 1];
-      if (!b || locked()) return;
+      if (!b || locked() || notesFor(state, itemById(openId)).length) return;
       const d = state.decisions[openId];
       d.decision = d.decision === b.key ? null : b.key;
       save();
@@ -1930,6 +2070,10 @@ function secondChairBootstrap() {
       if (!inlineCard(openId)) panelOpen.add(openId);
       refreshThread(openId);
       focusEditor(openId, inlineCard(openId) ? 'inline' : 'panel');
+    } else if (e.key === 'd' && state.payload.changes) {
+      const it = openId ? itemById(openId) : null;
+      const sha = it?.commits?.find((s) => state.payload.changes.commits.some((k) => k.sha === s));
+      openDiff(sha ? { kind: 'commit', sha } : { kind: 'range' }, document.activeElement);
     } else return;
     e.preventDefault();
     e.stopPropagation();
@@ -1944,6 +2088,10 @@ function secondChairBootstrap() {
       return;
     }
     const name = el.dataset.scField;
+    if (name === 'dnote') {
+      if (diff) diff.draftText = el.value;
+      return;
+    }
     if (!name || !state || locked()) return;
     const id = el.dataset.scId;
     const d = state.decisions[id];
@@ -1976,11 +2124,15 @@ function secondChairBootstrap() {
     if (!now) {
       loc = null;
       state = null;
+      closeDiff();
+      patchCache = null;
       removeShell();
       return;
     }
     if (!loc || now.repo !== loc.repo || now.number !== loc.number) {
       loc = now;
+      closeDiff();
+      patchCache = null;
       state = load();
       openId = null;
       message = null;

@@ -281,6 +281,82 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   const fgot = await api('GET', '/api/decisions?repo=acme/w&pr=9&round=1');
   check(fgot.status === 200 && JSON.parse(fgot.responseText).decisions.find((d) => d.thread_id === 'F1')?.decision === 'fix', 'Send decisions reaches the server');
 
+  // Round 2 with unpushed commits: the popup, notes on the code, and the locked reply.
+  const SA = 'a'.repeat(40);
+  const SB = 'b'.repeat(40);
+  const f = (path, patch, over = {}) => ({ path, old_path: null, status: 'M', add: 1, del: 1, binary: false, patch, ...over });
+  const big = `@@ -0,0 +1,500 @@\n${Array.from({ length: 500 }, (_, i) => `+row ${i}`).join('\n')}\n`;
+  const r2 = {
+    tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 10, round: 2, head: SB,
+    items: [
+      { thread_id: 'T1', comment_id: 11, author: 'bob', path: 'x/Y.java', line: 3, verdict: 'publish', reply_en: 'Fixed in aaaaaaa.', summary: 'S1', commits: [SA] },
+      { thread_id: 'T2', comment_id: 22, author: 'ann', path: 'z.md', line: 9, verdict: 'publish', reply_en: 'Done.', summary: 'S2', commits: [SB] },
+    ],
+    changes: {
+      base: 'c'.repeat(40), head: SB, add: 502, del: 1,
+      commits: [
+        { sha: SA, subject: 'Evict only when full', author: 't', add: 1, del: 1, files: [f('x/Y.java', '@@ -1,2 +1,2 @@\n a\n-evict();\n+if (full) evict();\n')] },
+        { sha: SB, subject: 'Add trace', author: 't', add: 501, del: 0, files: [f('trace.csv', big, { add: 500, del: 0, status: 'A' }), f('z.md', '@@ -1 +1,2 @@\n x\n+y\n', { add: 1, del: 0 })] },
+      ],
+      range: { files: [f('x/Y.java', '@@ -1,2 +1,2 @@\n a\n-evict();\n+if (full) evict();\n', { commits: [SA] }), f('trace.csv', big, { add: 500, del: 0, status: 'A', commits: [SB] }), f('z.md', '@@ -1 +1,2 @@\n x\n+y\n', { add: 1, del: 0, commits: [SB] })] },
+    },
+  };
+  await api('PUT', '/api/proposals', r2);
+  const p2 = await openPage(browser, port, null, 10);
+  await p2.waitForSelector(card('T1'));
+  check(await p2.locator(`${card('T1')} [data-sc-act=diff][data-sc-val="${SA}"]`).count() === 1, 'the card shows its commit with View changes');
+  await p2.click('.sc-toggle');
+  check((await p2.textContent('.sc-push')).includes('Push will send') && await p2.locator('.sc-pushrow').count() === 0, 'the push row is folded by default');
+  await p2.click('[data-sc-act=pushfold]');
+  check(await p2.locator('.sc-pushrow').count() === 2, 'the chevron shows the commits');
+
+  await p2.click('.sc-push [data-sc-act=diff][data-sc-val=range]');
+  await p2.waitForSelector('.sc-diff');
+  check((await p2.textContent('.sc-diff .sc-dhead')).includes('Changes not pushed yet'), 'View opens the popup on the range');
+  check(await p2.evaluate(() => Math.abs(document.querySelector('.sc-diff').getBoundingClientRect().width - innerWidth * 0.8) < 2), 'the popup is 80% of the window wide');
+  check((await p2.textContent('.sc-diff')).includes('folded because it is large'), 'a file over 400 lines starts folded');
+  await p2.keyboard.press('j');
+  check(await p2.locator('.sc-row.sc-selected').count() === 0, 'card keys do nothing while the popup is open');
+  await p2.keyboard.press('Escape');
+  check(await p2.locator('.sc-diff').count() === 0, 'Esc closes the popup');
+  await p2.click('.sc-push [data-sc-act=diff][data-sc-val=range]');
+  await p2.waitForSelector('.sc-diff');
+  await p2.click('.sc-diff .sc-dhead [data-sc-act=dclose]');
+  check(await p2.locator('.sc-diff').count() === 0, 'the close button closes the popup');
+
+  await p2.click(`${card('T1')} [data-sc-act=diff]`);
+  await p2.waitForSelector('.sc-diff');
+  check((await p2.textContent('.sc-diff .sc-dhead')).includes('Commit aaaaaaa'), 'View changes on the card opens that commit');
+  await p2.click('.sc-diff [data-sc-act=dmark][data-sc-side=new][data-sc-n="2"]');
+  check(await p2.locator('.sc-diff textarea.sc-dnote').count() === 1 && (await p2.textContent('.sc-diff .sc-chip')).includes('L2'), 'a click on a line number marks it and opens the note');
+  await p2.fill('.sc-diff textarea.sc-dnote', 'Only for a new key.');
+  await p2.mouse.click(5, 5);
+  check(await p2.locator('.sc-diff').count() === 1 && (await p2.textContent('.sc-diff .sc-dfootbar')).includes('Save or cancel the note first'), 'a click outside with an unsaved note keeps the popup open');
+  await p2.click('.sc-diff [data-sc-act=dsave]');
+  check((await p2.textContent('.sc-diff .sc-dfootbar')).includes('is now Change code'), 'the footer names the locked reply');
+  await p2.mouse.click(5, 5);
+  check(await p2.locator('.sc-diff').count() === 0, 'a click outside closes the popup');
+  check((await p2.textContent(card('T1'))).includes('Change code') && await p2.locator(`${card('T1')} [data-sc-val=publish][disabled]`).count() === 1, 'the card is locked as Change code');
+  await p2.click('.sc-row-main[data-sc-id=T1]');
+  await p2.keyboard.press('1');
+  await p2.keyboard.press('5');
+  check(await p2.locator(`${card('T1')} .sc-change-on`).count() === 1 && await p2.locator(`${card('T1')} .sc-btn.sc-on[data-sc-val]`).count() === 0, 'number keys change nothing on a locked card, and 5 is no key');
+  await p2.click(`${card('T2')} [data-sc-val=hold]`);
+  await p2.click('[data-sc-act=export]');
+  await p2.waitForSelector('body > .sc-panel .sc-wait');
+  const sentRes = await api('GET', '/api/decisions?repo=acme/w&pr=10&round=2&peek=1');
+  const sent = { body: JSON.parse(sentRes.responseText || 'null') };
+  check(sent.body?.code_notes?.[0]?.text === 'Only for a new key.' && sent.body.decisions.find((x) => x.thread_id === 'T1').decision === 'change', 'the send carries the note and the change decision');
+
+  // A new round 2 while the popup is open closes it. After the send the page waits and keeps polling; the popup
+  // opens read only.
+  await p2.click('.sc-push [data-sc-act=diff][data-sc-val=range]');
+  await p2.waitForSelector('.sc-diff');
+  await api('PUT', '/api/proposals', { ...r2, items: r2.items.map((it) => ({ ...it })) });
+  await p2.waitForSelector('.sc-diff', { state: 'detached', timeout: 15000 }).catch(() => {});
+  check(await p2.locator('.sc-diff').count() === 0, 'a new round closes the popup');
+  await p2.close();
+
   await browser.close();
   server.close();
   fs.rmSync(root, { recursive: true, force: true });
