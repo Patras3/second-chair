@@ -175,7 +175,7 @@ test('a body over 5 MB gets a 413 answer, with or without a Content-Length', asy
   for (const chunked of [false, true]) {
     const status = await new Promise((resolve, reject) => {
       const headers = { 'Content-Type': 'application/json', 'X-Second-Chair': '1', ...(chunked ? {} : { 'Content-Length': big.length }) };
-      const req = request({ host: '127.0.0.1', port, method: 'PUT', path: '/api/proposals', headers }, (res) => { res.resume(); resolve(res.statusCode); });
+      const req = request({ host: '127.0.0.1', port, method: 'POST', path: '/api/decisions', headers }, (res) => { res.resume(); resolve(res.statusCode); });
       req.on('error', reject);
       if (chunked) for (let i = 0; i < big.length; i += 1024 * 1024) req.write(big.subarray(i, i + 1024 * 1024));
       else req.write(big);
@@ -184,6 +184,53 @@ test('a body over 5 MB gets a 413 answer, with or without a Content-Length', asy
     assert.equal(status, 413, chunked ? 'chunked' : 'with Content-Length');
   }
   assert.equal((await call('GET', '/api/status')).status, 200, 'the server still answers');
+});
+
+const SHA_A = 'a'.repeat(40);
+const SHA_B = 'b'.repeat(40);
+const withChanges = (patch = '@@ -1 +1 @@\n-x\n+y\n') => ({
+  tool: 'second-chair', kind: 'proposals', repo: 'acme/ch', pr: 9, round: 2, head: SHA_B,
+  items: [{ thread_id: 'T1', verdict: 'publish', reply_en: 'Fixed.', commits: [SHA_B] }],
+  changes: {
+    base: SHA_A, head: SHA_B, add: 1, del: 1,
+    commits: [{ sha: SHA_B, subject: 's', author: 'a', add: 1, del: 1, files: [{ path: 'f.txt', old_path: null, status: 'M', add: 1, del: 1, binary: false, patch }] }],
+    range: { files: [{ path: 'f.txt', old_path: null, status: 'M', add: 1, del: 1, binary: false, patch, commits: [SHA_B] }] },
+  },
+});
+
+test('the patches are stored apart and served on /api/changes', async () => {
+  assert.equal((await call('PUT', '/api/proposals', withChanges())).status, 200);
+  const p = await call('GET', '/api/proposals?repo=acme/ch&pr=9');
+  assert.equal(p.body.changes.commits[0].files[0].patch, undefined);
+  assert.equal(p.body.changes.range.files[0].add, 1);
+  const c = await call('GET', '/api/changes?repo=acme/ch&pr=9&round=2');
+  assert.equal(c.status, 200);
+  assert.equal(c.body.published_at, p.body.published_at);
+  assert.equal(c.body.commits[0].files[0].patch, '@@ -1 +1 @@\n-x\n+y\n');
+  assert.equal((await call('GET', '/api/changes?repo=acme/ch&pr=9&round=x')).status, 400);
+  assert.equal((await call('GET', '/api/changes?repo=acme/ch&pr=9&round=1')).status, 404);
+});
+
+test('new proposals without changes remove the old patches, and a round 1 removes all of them', async () => {
+  await call('PUT', '/api/proposals', withChanges());
+  const lean = withChanges();
+  delete lean.changes;
+  await call('PUT', '/api/proposals', lean);
+  assert.equal((await call('GET', '/api/changes?repo=acme/ch&pr=9&round=2')).status, 404);
+  await call('PUT', '/api/proposals', withChanges());
+  await call('PUT', '/api/proposals', { ...lean, round: 1, items: [{ thread_id: 'T1', verdict: 'fix', reply_en: 'x' }] });
+  const names = await readdir(join(root, 'acme', 'ch', '9'));
+  assert.equal(names.some((n) => n.endsWith('-changes.json')), false);
+});
+
+test('a bad changes shape is refused, and a payload up to 64 MB is taken', async () => {
+  const bad = withChanges();
+  bad.changes.head = 'nope';
+  assert.equal((await call('PUT', '/api/proposals', bad)).status, 400);
+  const big = withChanges(`@@ -1 +1 @@\n+${'x'.repeat(6 * 1024 * 1024)}\n`);
+  assert.equal((await call('PUT', '/api/proposals', big)).status, 200);
+  const small = { tool: 'second-chair', kind: 'decisions', repo: 'acme/ch', pr: 9, round: 2, head: SHA_B, decisions: [], pad: 'x'.repeat(6 * 1024 * 1024) };
+  assert.equal((await call('POST', '/api/decisions', small)).status, 413);
 });
 
 test('with a pid file, the server writes its pid once it listens, and removes the file when it closes', async () => {
