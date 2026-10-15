@@ -1,6 +1,6 @@
 // Renders the README screenshots: the userscript on a mock GitHub pull request page, with a real
 // second-chair server behind it. Run: PLAYWRIGHT=/path/to/node_modules/playwright npm run screenshots
-// Writes docs/images/{card-light,card-dark,panel,review-mode,waiting,done,tour,social-preview}.png.
+// Writes docs/images/{card-light,card-dark,panel,review-mode,waiting,done,diff,tour,social-preview}.png.
 const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
 const fs = require('fs');
 const os = require('os');
@@ -347,6 +347,44 @@ const hidePill = (page) => page.addStyleTag({ content: '.sc-toggle{visibility:hi
     const p = await openPage(browser, port, { url: url42, html: html42('light'), store, viewport: { width: 1000, height: 830 }, scale: 1.4 });
     await p.waitForSelector('.sc-banner-done .sc-posted');
     await shoot(p.locator('.sc-panel'), 'done.png');
+    await p.context().close();
+  }
+
+  // 6b. Round 2 with the commits that git push will send: the popup on the whole range, one note saved.
+  {
+    const S1 = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const S2 = 'd4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3';
+    const file = (p, patch, add, del, over = {}) => ({ path: p, old_path: null, status: 'M', add, del, binary: false, patch, ...over });
+    const lru = '@@ -39,7 +39,9 @@ public V put(K key, V value) {\n     lock.lock();\n     try {\n         map.put(key, value);\n-        evict();\n+        if (map.size() >= capacity) {\n+            evict();\n+        }\n         return value;\n     } finally {\n         lock.unlock();\n';
+    const test = '@@ -20,0 +21,6 @@ class LruCacheTest {\n+    @Test\n+    void putUnderCapacityKeepsEntries() {\n+        var cache = new LruCache<String, Integer>(10);\n+        for (int i = 0; i < 10; i++) cache.put("k" + i, i);\n+        assertEquals(10, cache.size());\n+    }\n';
+    const stats = '@@ -29,8 +29,8 @@ public final class CacheStats {\n     private final String name;\n-    private long hits;\n-    private long misses;\n+    private final LongAdder hits = new LongAdder();\n+    private final LongAdder misses = new LongAdder();\n \n     void recordHit() {\n-        hits++;\n+        hits.increment();\n     }\n';
+    const changes = {
+      base: HEAD1, head: S2, add: 17, del: 6,
+      commits: [
+        { sha: S1, subject: 'Evict only when the map is full', author: 'Sam Dev', add: 9, del: 1, files: [file('src/cache/LruCache.java', lru, 3, 1), file('src/cache/LruCacheTest.java', test, 6, 0)] },
+        { sha: S2, subject: 'Count hits with LongAdder', author: 'Sam Dev', add: 4, del: 3, files: [file('src/cache/CacheStats.java', stats, 4, 3)] },
+      ],
+      range: { files: [file('src/cache/CacheStats.java', stats, 4, 3, { commits: [S2] }), file('src/cache/LruCache.java', lru, 3, 1, { commits: [S1] }), file('src/cache/LruCacheTest.java', test, 6, 0, { commits: [S1] })] },
+    };
+    const items = [
+      { thread_id: 'PRRT_kwDOAbc042', comment_id: 1042, author: 'ana-ng', path: 'src/cache/LruCache.java', line: 42, verdict: 'publish', commits: [S1],
+        summary: 'Evicts on every put, even under capacity', reply_en: 'Good catch, it was not intended. Eviction now runs only when the map is full. Done in a1b2c3d.' },
+      { thread_id: 'PRRT_kwDOAbc231', comment_id: 1231, author: 'jkim', path: 'src/cache/CacheStats.java', line: 31, verdict: 'publish', commits: [S2],
+        summary: '`hits` is not thread-safe', reply_en: 'Right, it lost hits under contention. `hits` and `misses` are now `LongAdder`s. Done in d4e5f6a.' },
+    ];
+    const url61 = `https://github.com/${REPO}/pull/61/files`;
+    await api('PUT', '/api/proposals', { ...proposals(61, 2, S2, items), changes });
+    const r2 = await stored(61, 2);
+    const store = { ...browserState(r2, { PRRT_kwDOAbc231: { decision: 'publish' } }), 'sc:ui': JSON.stringify({ filter: 'all', wide: false, open: true }) };
+    const p = await openPage(browser, port, { url: url61, html: html42('light'), store, viewport: { width: 1400, height: 900 }, scale: 1 });
+    await p.waitForSelector('.sc-push [data-sc-act=diff][data-sc-val=range]');
+    await p.click('.sc-push [data-sc-act=diff][data-sc-val=range]');
+    await p.waitForSelector('.sc-diff');
+    await p.click('.sc-diff [data-sc-act=dmark][data-sc-side=new][data-sc-n="42"]');
+    await p.fill('.sc-diff textarea.sc-dnote', 'Evict only when the key is new. An update of an existing key must not push an entry out.');
+    await p.click('.sc-diff [data-sc-act=dsave]');
+    await p.waitForTimeout(400);
+    await shoot(p.locator('.sc-diff'), 'diff.png');
     await p.context().close();
   }
 

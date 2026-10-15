@@ -120,6 +120,10 @@ The agent marks an item **auto** when it has no doubt, such as a typo. An auto i
 
 **Round 2: publish.** The cards come back with the final replies and the commits. The buttons are **Publish**, **Revise**, **Hold** and **Manual**. **Revise** asks the agent for a new version, with a note. Round 2 then comes back, and nothing is posted. After you send without a **Revise**, the agent pushes the commits and runs `second-chair publish`. It posts the replies you marked **Publish**, with the text as you left it. **Hold** and **Manual** post nothing.
 
+In round 2, every reply shows the commits it cites, and the side panel shows what `git push` will send. **View** opens the diff over the page. A note under a file goes to the agent and makes the reply **Change code**: the agent changes the code before anything is pushed.
+
+![The diff of the unpushed commits, with a note for the agent](docs/images/diff.png)
+
 Respond mode posts nothing on GitHub until you send round 2.
 
 ![The side panel next to the pull request: 5 of 8 threads decided, the threads grouped by file, the selected thread's card on the page](docs/images/panel.png)

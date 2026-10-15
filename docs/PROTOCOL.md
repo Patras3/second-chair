@@ -8,12 +8,14 @@ The decision keys live in two places in the code: `ROUND_KEYS` in `lib/protocol.
 
 | Mode | Use | Round 1 keys | Round 2 keys |
 |:--|:--|:--|:--|
-| `reply` | Answer the review threads on your own pull request | `reply`, `fix`, `pushback`, `manual` | `publish`, `revise`, `hold`, `manual` |
+| `reply` | Answer the review threads on your own pull request | `reply`, `fix`, `pushback`, `manual` | `publish`, `revise`, `hold`, `manual`, `change` |
 | `review` | Decide the comments of your pending review on someone else's pull request | `post`, `revise`, `drop` | `post`, `revise`, `drop` |
 
 A payload without `mode` is in `reply` mode. Round 2 is the final round in both modes. `publish` acts only on round 2 decisions.
 
 A round 2 sent with at least one `revise` does not end the work. The agent rewrites those items and pushes round 2 again, and `publish` refuses such decisions.
+
+A round 2 of respond mode with at least one `change` does not end the work either. `change` is derived: the user's notes on the code set it, and the agent never proposes it. The agent changes the code, updates the replies and pushes round 2 again. `publish` refuses such decisions.
 
 The page labels `post` as **Keep**, because in review mode nothing becomes public before the review is submitted.
 
@@ -30,6 +32,7 @@ What each key means:
 | `post` | Keep the comment, with the text in the decision. For the review body: set the body. The page shows it as **Keep**. |
 | `revise` | The agent rewrites the reply or comment as the note says. In round 2 it then pushes round 2 again instead of publishing. A `revise` decision needs a note that is not empty. |
 | `drop` | Delete the comment from the pending review. For the review body: clear it. |
+| `change` | Set by a note on the code. Not a button. The agent changes the code and sends round 2 again. |
 
 ## Proposals
 
@@ -75,6 +78,7 @@ The agent writes items, and `second-chair build` wraps them into a proposals pay
 | `items` | array | One item per thread or comment. At least one. |
 | `published_at` | string | Set by the server when the payload is pushed. |
 | `closed_at` | string | Set by the server when the work on the pull request was closed after this payload was pushed. The page then hides the cards. |
+| `changes` | object | Respond mode, round 2, from `build --base`: the commits that `git push` will send. `base` (the pull request's head on GitHub), `head` (the local HEAD), `add`, `del` (range totals), `commits` (oldest first: `sha`, `subject`, `author`, `add`, `del`, `files`) and `range.files` (the net diff from `base` to `head`, each file with the `commits` that changed it). A file has `path`, `old_path`, `status`, `add`, `del`, `binary` and `patch`. The server keeps the patches apart and serves them on `GET /api/changes`. |
 
 ### Item fields
 
@@ -91,7 +95,7 @@ The agent writes items, and `second-chair build` wraps them into a proposals pay
 | `fix` | string | Markdown: the planned change, for `fix`. The card shows it under the context as "Plan". |
 | `reply_en` | string | Required. Markdown: the reply or comment as it will be posted. For the `BODY` item: the proposed review body. |
 | `auto` | boolean | `true` when the item needs no decision from the user. It counts as decided with its `verdict`, and the card shows one line. The user can still pick another button. In round 2, a verdict that posts text (`publish` in `reply` mode, `post` in `review` mode) cannot be `auto`. |
-| `commits` | array of strings | The commits behind the reply, usually in round 2. The card and the panel show them. |
+| `commits` | array of strings | Full shas. With `--base`, `build` turns each entry, a unique prefix of 7 or more characters, into the full sha of a commit in `changes`. The card shows each as a row with **View changes**. |
 | `origin` | string | `"agent"` (the default), `"user"` or `"earlier"`. `"user"` marks a comment or a review body that the user wrote. Its card says "Your draft comment". `"earlier"` marks a comment that Second Chair added in an earlier review pass. Its card says "Second Chair · earlier pass". |
 | `original_en` | string | For `origin: "user"` or `"earlier"`: the text the comment has now. When `reply_en` is a different text, the card shows it in a folded block, "Your original" or "Earlier text". |
 | `needs_submit` | boolean | `BODY` item only. `true` when the pending review has no body. GitHub then adds a body only together with the submit, so the page asks for a submit event when the body is kept. |
@@ -106,10 +110,22 @@ Older payloads spell `summary`, `context` and `fix` as `summary_pl`, `context_pl
 - a round 1 item has no `thread_id`, `verdict` or `reply_en`;
 - a round 2 item has no `thread_id` or `reply_en`;
 - a `verdict` is not a key of that mode and round;
+- a verdict is `change`: the user's notes set it, the agent never proposes it;
 - `origin` is not `agent`, `user` or `earlier`;
 - `suggested_submit` is not a submit event, `needs_submit` is not a boolean, or either sits on an item other than `BODY`;
 - two items share a `thread_id`;
-- a round 2 item has `auto: true` with the verdict `publish` (`reply` mode) or `post` (`review` mode). The user approves every text that gets posted.
+- a round 2 item has `auto: true` with the verdict `publish` (`reply` mode) or `post` (`review` mode). The user approves every text that gets posted;
+- `changes` has a bad shape, or sits outside round 2 of respond mode.
+
+With `--base SHA`, `build` also refuses when:
+
+- `--base` or `--head` is not 40 hex characters;
+- `--head` is not this directory's HEAD. Build from the pull request's working tree;
+- the base is not an ancestor of HEAD. The local branch does not contain the pull request's head on GitHub. A rebase would need a force push, which Second Chair does not do. Tell the user;
+- git does not know the base. Run `git fetch`, then build again;
+- an entry of `commits` is not a unique prefix of 7 or more characters of a commit between the base and HEAD.
+
+When the base equals HEAD, `build` leaves `changes` out. `--base` is allowed only in respond mode, round 2. `build` runs git from the repository's top level, through `execFile` and never a shell, with fixed options and `--literal-pathspecs`.
 
 `build` puts the general items first. The server checks less: `tool`, `kind`, `repo`, `pr`, `mode`, `round`, at least one item, unique `thread_id` values and the `auto` rule above. The page also never counts such an item as decided until the user picks a button.
 
@@ -161,7 +177,30 @@ The userscript sends this when the user clicks **Send decisions**. `wait` and `g
 | `decisions[].reply_en` | string | The final text, maybe edited by the user. `publish` posts this text. |
 | `decisions[].reply_edited` | boolean | `true` when the user changed the text. |
 | `decisions[].note` | string | The user's instruction for the agent. It overrides the agent's plan. |
+| `code_notes` | array | Respond mode, round 2 only. The user's notes on the code, see below. |
 | `submit` | string or null | Review mode, round 2 only. What happens to the review after `publish` applied the decisions: `COMMENT`, `APPROVE` or `REQUEST_CHANGES` submits it with that event. `null` or missing leaves it as a draft. |
+
+### Code notes
+
+In round 2 of respond mode the user can leave a note under a file of the diff. The decisions then carry `code_notes`:
+
+```json
+"code_notes": [
+  { "sha": "4e1a9c2b7d3f5a6081c2d3e4f5a6b7c8d9e0f1a2", "path": "src/main/java/cache/LruCache.java", "view": "range",
+    "lines": [ { "side": "new", "n": 40 }, { "side": "new", "n": 41 } ],
+    "text": "Evict only when the key is new.",
+    "thread_ids": ["PRRT_kwDOAbc042"] }
+]
+```
+
+- `sha` and `path` name a commit of `changes.commits` and a file of that commit. The note has a `text` that is not empty.
+- `view` is `"range"` or `"commit"`. A new-side line number is the line in that file at HEAD in both views. An old-side number is the line at the base in `"range"`, and the line in the commit's parent in `"commit"`. A `"range"` note's `sha` is the last commit that changed the file.
+- There is one note per `sha`, `path` and `view`.
+- `thread_ids` are the threads whose item cites the `sha` in `commits`. The server computes the same set and refuses a mismatch.
+- Each of those threads has the decision `change`. Every `change` is covered by a note.
+- A note on a commit that no reply cites has empty `thread_ids`. It is still a request to the agent.
+
+`change` is in `DERIVED` in `lib/protocol.mjs`: it is never a verdict, and the page gives it no button.
 
 The server refuses decisions with `409` when:
 
@@ -173,6 +212,8 @@ The server refuses decisions with `409` when:
 - a `thread_id` is not in the proposals;
 - a `decision` is not a key of that mode and round;
 - a `revise` decision has an empty note;
+- `code_notes` is set outside respond mode, round 2, or the proposals have no `changes`, or a note breaks the rules above;
+- a `change` decision is not covered by a note, or a thread in a note's `thread_ids` is not `change`;
 - `submit` is set outside review mode or round 2, or is not `COMMENT`, `APPROVE` or `REQUEST_CHANGES`;
 - `published_at` is set and differs from the proposals' `published_at`: the agent sent a new version of the round;
 - an item has no decision.
@@ -194,7 +235,7 @@ Rules for every request:
 - A `repo` is `owner/name`, and neither part may be `.` or `..`.
 - The `Host` header must be `127.0.0.1:<port>` or `localhost:<port>`. Otherwise the answer is `403`.
 - Every route under `/api/` needs the header `X-Second-Chair: 1`. Otherwise the answer is `403`.
-- A body is JSON, at most 5 MB. A larger body gets `413`, and a body that is not JSON gets `400`.
+- A body is JSON, at most 5 MB, except `PUT /api/proposals`, which takes up to 64 MB for the patches. A larger body gets `413`, and a body that is not JSON gets `400`.
 - An error answer is `{"error": "<message>"}`. An unknown route gets `404`, and an unexpected failure gets `500`.
 - Every answer carries `Cache-Control: no-store`.
 
@@ -204,6 +245,7 @@ Rules for every request:
 | `GET /second-chair.user.js` | | `200` with the userscript, with the server's port written into it. Needs no `X-Second-Chair` header. |
 | `GET /api/proposals` | `?repo=O/N&pr=N[&round=R]` | `200` with the payload, `400` without a valid `repo` and `pr` or with a `round` that is not a whole number of 1 or more, `404` when there is none. Without `round`: the most recently pushed round, so a new round 1 wins over an older round 2. |
 | `PUT /api/proposals` | a proposals payload | `200 {"ok": true, "published_at": "…"}`, `400` with the reason, or `409` while round R or R-1 has a changed revision the agent has not read (see [Changed decisions](#changed-decisions)). It replaces that round's proposals and deletes that round's decisions. A round 1 starts a new cycle, so it also deletes the record of what `publish` did in the last cycle. |
+| `GET /api/changes` | `?repo=O/N&pr=N&round=R` | `200 {"published_at", "commits", "range"}` with the patches, `400` without a valid `repo`, `pr` and `round`, `404` when the round has none. The patches are stored apart in `r<round>-changes.json` with the server's `published_at`, and a `published_at` in the client's payload is overridden. The page uses them only when this `published_at` equals the proposals'. |
 | `GET /api/decisions` | `?repo=O/N&pr=N&round=R[&peek=1]` | `200` with the decisions, `400` without `repo`, `pr` and `round`, `404` when there are none yet. Without `peek=1` the first read of a revision sets its `picked_up_at`. |
 | `POST /api/decisions` | a decisions payload | `200 {"ok": true, "revision": N}`, or `409` with the reason (see above). |
 | `POST /api/close` | `{"repo": "O/N", "pr": N}` | `200 {"ok": true, "closed_at": "…"}`, `400` without `repo` and `pr`, `404` when the pull request has no proposals. |
@@ -219,6 +261,7 @@ The server stores plain JSON files under the data directory (`SECOND_CHAIR_HOME`
 
 ```
 <owner>/<name>/<pr>/r<round>-proposals.json
+<owner>/<name>/<pr>/r<round>-changes.json
 <owner>/<name>/<pr>/r<round>-decisions.json
 <owner>/<name>/<pr>/r<round>-published.json
 <owner>/<name>/<pr>/closed.json
@@ -237,10 +280,12 @@ For the threads on your own pull request.
 4. `second-chair build --repo O/N --pr N --round 1 --head SHA items.json > r1.json`, then `second-chair push r1.json`.
 5. `second-chair wait --repo O/N --pr N --round 1 --timeout 1500`. Exit code `2` means the time ran out without a send, so run it again. The skills run `wait` in the background.
 6. Carry out the decisions and notes. Commit the fixes, but do not push.
-7. Write round 2 items with the final `reply_en`, the `commits`, and a `verdict` of `publish`, `hold` or `manual`. A thread the user marked `manual` in round 1 keeps `verdict: "manual"` with `auto: true`, so the user is not asked twice.
-8. `second-chair build --repo O/N --pr N --round 2 --head $(git rev-parse HEAD) items2.json > r2.json`, then `push`, then `wait --round 2`. When the decisions hold a `revise`, rewrite those replies and repeat this step. If `push` refuses because the decisions changed, run the `get` command it names, redo what changed, and push again.
-9. `git push`, when a reply to publish refers to a commit.
-10. `second-chair publish --repo O/N --pr N`. For each `publish` decision it posts `reply_en` as a reply to `comment_id`. A general item becomes a pull request comment. `hold` and `manual` post nothing.
+7. Write round 2 items with the final `reply_en`, the `commits` (only commits that are not on GitHub yet), and a `verdict` of `publish`, `hold` or `manual`. A thread the user marked `manual` in round 1 keeps `verdict: "manual"` with `auto: true`, so the user is not asked twice.
+8. `second-chair build --repo O/N --pr N --round 2 --head $(git rev-parse HEAD) --base $(gh pr view N --json headRefOid -q .headRefOid) items2.json > r2.json`, from the pull request's working tree. Then `push`, then `wait --round 2`. If `push` refuses because the decisions changed, run the `get` command it names, redo what changed, and push again.
+   - When the decisions hold a `revise`, rewrite those replies and repeat this step.
+   - When they hold a `change`, read `code_notes` and change the code. Make a new commit or rewrite the unpushed commits, but keep the base an ancestor of HEAD. Update `commits` and the reply text so they name the new shas, then repeat this step. Never push while a `change` is open.
+9. Check that `git rev-parse HEAD` equals `changes.head` of the round 2 the user decided. If it differs, the user has not seen the code: repeat step 8. Otherwise run `git push`, when a reply to publish refers to a commit.
+10. `second-chair publish --repo O/N --pr N`. For each `publish` decision it posts `reply_en` as a reply to `comment_id`. A general item becomes a pull request comment. `hold` and `manual` post nothing. It refuses while a decision is `revise` or `change`, or `code_notes` is not empty. It also refuses when the pull request's head on GitHub (`headRefOid`) is not `changes.head`, with a hint to wait a few seconds and run it again, or to build and push round 2 again. It posts nothing in both cases.
 11. `second-chair close --repo O/N --pr N`.
 
 ## Call order: review

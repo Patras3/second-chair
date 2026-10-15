@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Round 2 of respond mode shows the commits that `git push` will send. Each card shows the commits its reply cites, with **View changes**. The side panel has a folded row, **Push will send**, with the number of commits and lines.
+- A diff popup over the page: all commits as one diff, or one commit at a time. Large files start folded. Esc, ✕ and a click outside close it. The key `d` opens it.
+- Notes on the code. Under each file you can leave a note for the agent and mark lines by clicking their numbers. A note locks the replies that cite the commit as **Change code**. The agent changes the code and sends round 2 again. Deleting the note unlocks the reply.
+- `second-chair build --base SHA` adds the commits between the pull request's head on GitHub and the local HEAD.
+
+Changed:
+
+- `publish` refuses while a reply is **Change code**, and when the pull request's head on GitHub is not the head you approved.
+
 ## 1.1.5
 
 Added:
