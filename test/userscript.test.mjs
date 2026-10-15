@@ -910,3 +910,13 @@ test('a saved note shows under its file with its marks, and read only hides the 
   assert.match(html, /data-sc-act="dnote"/);
   assert.doesNotMatch(buildDiff(s, patches(), popup({ view: { kind: 'commit', sha: 'a'.repeat(40) } }), true), /data-sc-act="(dnote|ddelete|dmark)"/);
 });
+
+test('a saved range note says which commit it goes to when several commits changed the file', () => {
+  const s = diffState();
+  const p = patches();
+  p.range.files[0].commits = ['a'.repeat(40), SH];
+  s.payload.changes.range = { files: [{ path: 'f', add: 1, del: 0, binary: false, commits: ['a'.repeat(40), SH] }] };
+  const n = { sha: SH, path: 'f', view: 'range', lines: [], text: 'Rework this.' };
+  s.codeNotes[noteKey(n)] = n;
+  assert.match(buildDiff(s, p, popup(), false), /Goes to bbbbbbb/);
+});
