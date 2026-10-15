@@ -170,6 +170,149 @@ function splitPatches(payload) {
   return { payload: withoutPatches(payload), patches: hasPatches(payload) ? payload.changes : null };
 }
 
+const SC_FOLD_LINES = 400;
+const SC_FOLD_CHARS = 200000;
+
+const isSafeSha = (s) => /^[0-9a-f]{40}$/.test(String(s));
+
+/**
+ * A count from the payload, as text. A pasted payload is not checked by the server, so a count is forced to a number
+ * before it reaches the markup. Thousands get a space: 2 424.
+ */
+function fmtCount(n) {
+  return String(Math.max(0, Math.trunc(Number(n) || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+/** `+add −del` for a file, a commit or the range, with an empty side left out. */
+function countsHtml(x) {
+  const add = Number(x.add) || 0;
+  const del = Number(x.del) || 0;
+  return `<span class="sc-plus">${add ? `+${fmtCount(add)}` : ''}</span> <span class="sc-minus">${del ? `−${fmtCount(del)}` : ''}</span>`;
+}
+
+/** The lines of a unified diff, numbered on both sides. Lines before the first hunk header are git's header and are skipped. */
+function parsePatch(patch) {
+  const out = [];
+  let o = 0;
+  let n = 0;
+  for (const raw of String(patch ?? '').split('\n')) {
+    const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    if (h) {
+      o = Number(h[1]);
+      n = Number(h[2]);
+      out.push({ kind: 'hunk', old: null, new: null, text: raw });
+    } else if (!out.length) continue;
+    else if (raw.startsWith('+')) out.push({ kind: 'add', old: null, new: n++, text: raw.slice(1) });
+    else if (raw.startsWith('-')) out.push({ kind: 'del', old: o++, new: null, text: raw.slice(1) });
+    else if (raw.startsWith(' ')) out.push({ kind: 'ctx', old: o++, new: n++, text: raw.slice(1) });
+    else if (raw.startsWith('\\')) out.push({ kind: 'meta', old: null, new: null, text: raw });
+  }
+  return out;
+}
+
+/** Marked lines as the agent reads them: runs of new-side lines, then of removed lines. */
+function markLabel(lines) {
+  const runs = [];
+  for (const side of ['new', 'old']) {
+    for (const v of lines.filter((l) => l.side === side).map((l) => l.n).sort((a, b) => a - b)) {
+      const last = runs.at(-1);
+      if (last && last.side === side && v === last.to + 1) last.to = v;
+      else runs.push({ side, from: v, to: v });
+    }
+  }
+  return runs.map((r) => `${r.side === 'old' ? 'old ' : ''}L${r.from}${r.to > r.from ? `–${r.to}` : ''}`).join(', ');
+}
+
+/** The commit a note on `path` belongs to: the one shown, or in the range view the newest that changed the file. */
+function noteTarget(changes, view, path) {
+  if (view.kind === 'commit') return view.sha;
+  return changes.range.files.find((f) => f.path === path)?.commits.at(-1) ?? null;
+}
+
+function isLargeFile(f) {
+  return f.add + f.del > SC_FOLD_LINES || String(f.patch ?? '').length > SC_FOLD_CHARS;
+}
+
+/** The files a view shows: the net diff of the range, or one commit's. */
+function diffFiles(changes, view) {
+  if (view.kind === 'range') return changes.range.files;
+  return changes.commits.find((k) => k.sha === view.sha)?.files ?? [];
+}
+
+/** The popup over the page: commits and files on the left, the diff with one note per file on the right. */
+function buildDiff(state, patches, d, readOnly) {
+  const ch = state.payload.changes;
+  const src = patches ?? ch;
+  const view = d.view;
+  const commit = view.kind === 'commit' ? ch.commits.find((k) => k.sha === view.sha) : null;
+  const cmd = commit ? `git show ${commit.sha}` : `git log -p ${ch.base}..${ch.head}`;
+  const safe = isSafeSha(ch.base) && isSafeSha(ch.head) && (!commit || isSafeSha(commit.sha));
+  const counts = countsHtml;
+  const codeNotes = state.codeNotes ?? {};
+  const notesOn = (sha) => Object.values(codeNotes).filter((n) => n.sha === sha).length;
+  const cites = (sha) => state.payload.items.filter((it) => (it.commits ?? []).includes(sha)).map((it) => field(it, 'summary') || it.thread_id);
+  const title = commit ? `Commit ${commit.sha.slice(0, 7)} · ${commit.subject}` : 'Changes not pushed yet';
+  const sub = `${plural(ch.commits.length, 'commit', 'commits')} · from ${ch.base.slice(0, 7)} (PR head) to ${ch.head.slice(0, 7)} (your local HEAD)`;
+  const side = `<button type="button" class="sc-dpick${view.kind === 'range' ? ' sc-on' : ''}" data-sc-act="dview" data-sc-val="range"><b>All commits</b><span class="sc-mono sc-muted">${counts(ch)}</span></button>
+${ch.commits.map((k) => `<button type="button" class="sc-dpick${commit?.sha === k.sha ? ' sc-on' : ''}" data-sc-act="dview" data-sc-val="${esc(k.sha)}"><span><code class="sc-sha">${esc(k.sha.slice(0, 7))}</code> <span class="sc-mono">${counts(k)}</span>${notesOn(k.sha) ? ` <span class="sc-badge">${plural(notesOn(k.sha), 'note', 'notes')}</span>` : ''}</span><span>${esc(k.subject)}</span><span class="sc-muted sc-xs">${cites(k.sha).length ? `Reply: ${esc(cites(k.sha).join(', '))}` : 'No reply cites it'}</span></button>`).join('')}`;
+  const files = diffFiles(src, view);
+  const block = (f, i) => {
+    const sha = noteTarget(ch, view, f.path);
+    const key = noteKey({ sha, path: f.path, view: view.kind });
+    const note = codeNotes[key];
+    const editing = d.editing === key;
+    const folded = d.folded[f.path] ?? isLargeFile(f);
+    const marks = editing ? d.draftLines : note?.lines ?? [];
+    const marked = (side, n) => marks.some((l) => l.side === side && l.n === n);
+    const many = view.kind === 'range' && (f.commits?.length ?? 0) > 1;
+    let body = '';
+    if (!folded) {
+      if (f.binary) body = '<div class="sc-dmsg">Binary file, not shown.</div>';
+      else if (!patches) body = '';
+      else if (!f.patch) body = '<div class="sc-dmsg">No content changes.</div>';
+      else {
+        body = parsePatch(f.patch).map((l) => {
+          const lineSide = l.kind === 'del' ? 'old' : 'new';
+          const num = l.kind === 'del' ? l.old : l.new;
+          const mk = num != null && marked(lineSide, num);
+          const nums = `<span class="sc-dno">${l.old ?? ''}</span><span class="sc-dno">${l.new ?? ''}</span>`;
+          const gutter = num == null || readOnly ? `<span class="sc-dnums">${nums}</span>` : `<button type="button" class="sc-dnums" data-sc-act="dmark" data-sc-file="${i}" data-sc-side="${lineSide}" data-sc-n="${num}" aria-pressed="${mk}" title="Mark this line for your note">${nums}</button>`;
+          return `<div class="sc-dl sc-dl-${l.kind}${mk ? ' sc-dl-mk' : ''}">${gutter}<span class="sc-dsg">${{ add: '+', del: '−' }[l.kind] ?? ''}</span><span class="sc-dtx">${esc(l.text)}</span></div>`;
+        }).join('');
+      }
+    }
+    const goes = many ? `<span class="sc-muted sc-xs">Goes to ${esc(String(sha).slice(0, 7))}, the newest commit that changed this file.</span>` : '';
+    let foot = '';
+    if (editing) {
+      foot = `<label class="sc-dlabel" for="sc-dnote-${i}">Note on ${esc(f.path.split('/').pop())} <span class="sc-muted">for the agent · never posted on GitHub</span></label>
+<span class="sc-xs">${d.draftLines.length ? `<span class="sc-chip">${esc(markLabel(d.draftLines))}</span> <button type="button" class="sc-link" data-sc-act="dclearmarks">clear</button>` : '<span class="sc-muted">Click line numbers to mark lines (optional)</span>'}</span>${goes}
+<textarea id="sc-dnote-${i}" class="sc-dnote" data-sc-field="dnote" rows="3" placeholder="What should the agent change in this file?">${esc(d.draftText)}</textarea>
+<div class="sc-drow"><button type="button" class="sc-btn" data-sc-act="dcancel">Cancel</button><button type="button" class="sc-btn sc-on" data-sc-act="dsave" data-sc-file="${i}">Save note</button></div>`;
+    } else if (note) {
+      foot = `<div class="sc-dsaved"><div class="sc-drow"><b>Your note on this file</b><span class="sc-muted sc-xs">for the agent · never posted</span>${note.lines.length ? `<span class="sc-chip">${esc(markLabel(note.lines))}</span>` : ''}${readOnly ? '' : `<span class="sc-grow"></span><button type="button" class="sc-link" data-sc-act="dnote" data-sc-file="${i}">Edit</button><button type="button" class="sc-link" data-sc-act="ddelete" data-sc-file="${i}">Delete</button>`}</div><div>${richText(note.text)}</div></div>`;
+    } else if (!readOnly && patches) {
+      foot = `<div class="sc-drow"><button type="button" class="sc-btn" data-sc-act="dnote" data-sc-file="${i}">Add a note on this file</button><span class="sc-muted sc-xs">You can mark lines by clicking their numbers.</span></div>`;
+    }
+    const foldNote = folded && isLargeFile(f) && d.folded[f.path] === undefined ? `<span class="sc-muted sc-xs">${fmtCount((Number(f.add) || 0) + (Number(f.del) || 0))} lines · folded because it is large, click to show</span>` : '';
+    return `<div class="sc-dfile" id="sc-dfile-${i}">
+<button type="button" class="sc-dfhead" data-sc-act="dfold" data-sc-file="${i}" aria-expanded="${!folded}"><span class="sc-muted">${folded ? '▸' : '▾'}</span><span class="sc-mono sc-grow">${esc(f.old_path ? `${f.old_path} → ${f.path}` : f.path)}</span>${foldNote}${note ? '<span class="sc-badge">note for the agent</span>' : ''}${view.kind === 'range' ? (f.commits ?? []).map((s) => `<code class="sc-sha">${esc(s.slice(0, 7))}</code>`).join('') : ''}<span class="sc-mono">${counts(f)}</span></button>
+${body ? `<div class="sc-dbody">${body}</div>` : ''}${foot ? `<div class="sc-dfoot">${foot}</div>` : ''}</div>`;
+  };
+  const total = Object.keys(codeNotes).length;
+  const locked = state.payload.items.filter((it) => notesFor(state, it).length).map((it) => `“${field(it, 'summary') || it.thread_id}”`);
+  const footer = d.warn ? `<span class="sc-err">${esc(d.warn)}</span>`
+    : total ? `<span><b>${plural(total, 'note', 'notes')}</b> for the agent. ${locked.length ? `${esc(locked.join(', '))} ${locked.length === 1 ? 'is' : 'are'} now Change code, locked until the agent changes the code or you delete the note.` : 'No reply cites the commit; the agent still carries the note out.'}</span>`
+      : '<span class="sc-muted">Add a note under a file to ask the agent for a change. Nothing here goes to GitHub.</span>';
+  const missing = patches ? '' : `<div class="sc-dmsg">The diff needs the local server. Start it with <code>second-chair start</code>, or run <code>${esc(cmd)}</code>.</div>`;
+  return `<div class="sc-diff-backdrop" data-sc-act="dclose"></div>
+<div class="sc-diff" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+<div class="sc-dhead">${SC_LOGO}<div class="sc-grow"><b>${esc(title)}</b><div class="sc-muted sc-xs">${esc(sub)}</div></div><span class="sc-label sc-notpushed">not pushed</span>${safe ? `<button type="button" class="sc-btn" data-sc-act="dcopy" data-sc-val="${esc(cmd)}">Copy git command</button>` : ''}<button type="button" class="sc-icon" data-sc-act="dclose" aria-label="Close">✕</button></div>
+<div class="sc-dmain"><div class="sc-dside"><div class="sc-dsec">Commits</div>${side}<div class="sc-dsec">Files · ${files.length}</div>${files.map((f, i) => `<a class="sc-dflink" href="#sc-dfile-${i}" data-sc-act="djump" data-sc-file="${i}"><span class="sc-mono">${esc(f.path.split('/').pop())}</span><span class="sc-mono">${counts(f)}</span></a>`).join('')}</div>
+<div class="sc-dlist">${missing}${files.map(block).join('')}<div class="sc-muted sc-xs">Snapshot taken when the agent sent round 2. If the agent changes a commit, its hash changes and the card shows the new one.</div></div></div>
+<div class="sc-dfootbar">${footer}<span class="sc-grow"></span><button type="button" class="sc-btn sc-on" data-sc-act="dclose">Done</button></div>
+</div>`;
+}
+
 /** Parses pasted text; returns { payload } or { error }. */
 function parsePayload(text) {
   let p;
@@ -776,7 +919,7 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 @keyframes sc-spin{to{transform:rotate(360deg)}}
 .sc-msg{margin:10px 14px 0;font-size:12px}.sc-msg.sc-err{color:var(--fgColor-danger,#d1242f)}
 .sc-paste{margin:10px 14px;width:calc(100% - 28px);min-height:90px;font:12px ui-monospace,monospace}
-.sc-card,.sc-panel,.sc-toggle,.sc-tour{--sc-accent:var(--fgColor-accent,#0969da);--sc-border:var(--borderColor-default,#d0d7de);--sc-subtle:var(--bgColor-muted,#f6f8fa);--sc-canvas:var(--bgColor-default,#fff);--sc-muted:var(--fgColor-muted,#59636e);--sc-success:var(--fgColor-success,#1a7f37)}
+.sc-card,.sc-panel,.sc-toggle,.sc-tour,.sc-diff-layer{--sc-accent:var(--fgColor-accent,#0969da);--sc-border:var(--borderColor-default,#d0d7de);--sc-subtle:var(--bgColor-muted,#f6f8fa);--sc-canvas:var(--bgColor-default,#fff);--sc-muted:var(--fgColor-muted,#59636e);--sc-success:var(--fgColor-success,#1a7f37)}
 .sc-card{
   border:1px solid var(--sc-border);border-left:3px solid var(--sc-accent);border-radius:6px;background:var(--sc-canvas);color:var(--fgColor-default,#1f2328);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;overflow:hidden}
 .sc-card[data-sc-where=inline]{margin:8px 16px 16px}
@@ -835,6 +978,45 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-card code,.sc-row code{font-size:11.5px;padding:0 4px;border-radius:4px;background:var(--bgColor-muted,#f6f8fa)}
 .sc-md pre code{padding:0;background:none}
 .sc-flash{outline:3px solid var(--fgColor-accent,#0969da);outline-offset:2px;transition:outline-color 1.5s}
+.sc-diff-backdrop{position:fixed;inset:0;z-index:2147483600;background:rgba(31,35,40,.55)}
+.sc-diff{position:fixed;z-index:2147483601;box-sizing:border-box;left:50%;top:40px;bottom:40px;transform:translateX(-50%);width:80%;max-width:1800px;display:flex;flex-direction:column;background:var(--sc-canvas);color:var(--fgColor-default,#1f2328);border:1px solid var(--sc-border);border-radius:12px;box-shadow:0 12px 48px rgba(31,35,40,.35);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;overflow:hidden}
+@media (max-width:900px){.sc-diff{width:100%;top:0;bottom:0;border-radius:0}}
+.sc-dhead,.sc-dfootbar{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--sc-border)}
+.sc-dfootbar{border-bottom:0;border-top:1px solid var(--sc-border);background:var(--sc-subtle);font-size:13px}
+.sc-dmain{flex:1;min-height:0;display:flex}
+.sc-dside{width:300px;flex:none;overflow:auto;border-right:1px solid var(--sc-border);padding:8px 0}
+.sc-dsec{padding:12px 14px 4px;font-size:12px;font-weight:600;color:var(--sc-muted);text-transform:uppercase}
+.sc-dpick{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;font:inherit;font-size:13px;color:inherit;background:none;border:0;border-left:3px solid transparent;padding:8px 14px;cursor:pointer}
+.sc-dpick.sc-on{background:var(--bgColor-accent-muted,#ddf4ff);border-left-color:var(--sc-accent)}
+.sc-dflink{display:flex;justify-content:space-between;gap:8px;padding:3px 14px;font-size:12px;color:inherit}
+.sc-dlist{flex:1;min-width:0;overflow:auto;padding:16px 20px;display:flex;flex-direction:column;gap:16px}
+.sc-dfile{border:1px solid var(--sc-border);border-radius:6px;overflow:hidden;flex:none}
+.sc-dfhead{display:flex;align-items:center;gap:10px;width:100%;font:inherit;font-size:13px;color:inherit;background:var(--sc-subtle);border:0;border-bottom:1px solid var(--sc-border);padding:8px 14px;cursor:pointer;text-align:left}
+.sc-dbody{overflow-x:auto}
+.sc-dl{display:flex;font:12.5px/20px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;white-space:pre}
+.sc-dnums{display:flex;flex:none;border:0;margin:0;padding:0;background:none;font:inherit;color:var(--sc-muted);cursor:pointer}
+span.sc-dnums{cursor:default}
+.sc-dno{width:48px;text-align:right;padding-right:10px;user-select:none}
+.sc-dsg{width:20px;flex:none;text-align:center;user-select:none}
+.sc-dtx{flex:1;min-width:0;padding-right:16px}
+.sc-dl-add{background:var(--diffBlob-additionLine-bgColor,var(--bgColor-success-muted,#e6ffec))}
+.sc-dl-del{background:var(--diffBlob-deletionLine-bgColor,var(--bgColor-danger-muted,#ffebe9))}
+.sc-dl-hunk{background:var(--diffBlob-hunkLine-bgColor,var(--bgColor-accent-muted,#ddf4ff));color:var(--sc-muted)}
+.sc-dl-meta{color:var(--sc-muted)}
+.sc-dl-mk{background:var(--bgColor-attention-muted,#fff8c5);box-shadow:inset 3px 0 0 var(--fgColor-attention,#9a6700)}
+.sc-dfoot{border-top:1px solid var(--sc-border);background:var(--sc-subtle);padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.sc-dsaved{background:var(--sc-canvas);border:1px solid var(--sc-border);border-radius:6px;padding:8px 12px}
+.sc-drow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sc-dnote{font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--sc-border);border-radius:6px;background:var(--sc-canvas);color:inherit;resize:vertical}
+.sc-dmsg{padding:12px 16px;color:var(--sc-muted)}
+.sc-chip{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:0 8px;border-radius:2em;border:1px solid var(--borderColor-attention-emphasis,#d4a72c);background:var(--bgColor-attention-muted,#fff8c5)}
+.sc-badge{font-size:12px;padding:0 8px;border-radius:2em;background:var(--bgColor-accent-muted,#ddf4ff);color:var(--sc-accent)}
+.sc-sha{font-size:12px;padding:1px 6px;border-radius:6px;background:var(--sc-subtle);color:var(--sc-accent)}
+.sc-plus{color:var(--fgColor-success,#1a7f37);font-weight:600}.sc-minus{color:var(--fgColor-danger,#d1242f);font-weight:600}
+.sc-notpushed{color:var(--fgColor-attention,#9a6700);border-color:var(--borderColor-attention-emphasis,#d4a72c)}
+.sc-mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.sc-xs{font-size:12px}
+.sc-diff .sc-err{color:var(--fgColor-danger,#d1242f);font-weight:600}
 `;
 
 function secondChairBootstrap() {

@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor', 'notesFor', 'noteKey', 'withoutPatches', 'hasPatches', 'splitPatches'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor, notesFor, noteKey, withoutPatches, hasPatches, splitPatches } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor', 'notesFor', 'noteKey', 'withoutPatches', 'hasPatches', 'splitPatches', 'parsePatch', 'markLabel', 'noteTarget', 'isLargeFile', 'diffFiles', 'isSafeSha', 'buildDiff'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor, notesFor, noteKey, withoutPatches, hasPatches, splitPatches, parsePatch, markLabel, noteTarget, isLargeFile, diffFiles, isSafeSha, buildDiff } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -409,7 +409,7 @@ test('the mark is one inline SVG in the text colour, with no old SC badge', () =
   assert.match(SC_LOGO, /^<svg [^>]*viewBox="0 0 16 16"[^>]*stroke="currentColor"[^>]*class="sc-logo" aria-hidden="true">/);
   assert.ok(!source.includes('sc-mark'));
   assert.ok(source.includes('toggle.setAttribute(\'aria-label\', \'Second Chair\')'), 'the pill button has an accessible name');
-  assert.equal(source.split('${SC_LOGO}').length - 1, 3, 'pill (twice) and panel header use the constant');
+  assert.equal(source.split('${SC_LOGO}').length - 1, 4, 'pill (twice), panel header and popup header use the constant');
   const s = stateFor(payload(), null);
   s.decisions.T1.decision = 'fix'; s.payload.items[0].auto = true;
   assert.ok(buildCard(s, s.payload.items[0], 'inline', { expanded: false }).includes(SC_LOGO), 'the compact line carries the mark');
@@ -831,4 +831,82 @@ test('a payload with patches is split, so the stored state never holds them', ()
   assert.equal(patches.commits[0].files[0].patch, '@@ -1 +1 @@\n+x\n');
   assert.equal(splitPatches(r2()).patches, null);
   assert.equal(JSON.stringify(stateFor(payload, null)).includes('+x'), false);
+});
+
+test('parsePatch numbers old and new lines and keeps the no-newline marker', () => {
+  const lines = parsePatch('@@ -9,3 +9,4 @@ class X\n a\n-b\n+B\n+C\n c\n\\ No newline at end of file\n');
+  assert.deepEqual(lines.map((l) => [l.kind, l.old, l.new, l.text]), [
+    ['hunk', null, null, '@@ -9,3 +9,4 @@ class X'], ['ctx', 9, 9, 'a'], ['del', 10, null, 'b'], ['add', null, 10, 'B'], ['add', null, 11, 'C'], ['ctx', 11, 12, 'c'], ['meta', null, null, '\\ No newline at end of file'],
+  ]);
+  assert.deepEqual(parsePatch(''), []);
+});
+
+test('markLabel joins runs per side', () => {
+  assert.equal(markLabel([{ side: 'new', n: 42 }, { side: 'new', n: 40 }, { side: 'new', n: 41 }, { side: 'old', n: 12 }]), 'L40–42, old L12');
+  assert.equal(markLabel([{ side: 'new', n: 3 }, { side: 'new', n: 5 }]), 'L3, L5');
+  assert.equal(markLabel([]), '');
+});
+
+test('a range note goes to the newest commit that changed the file', () => {
+  const ch = { range: { files: [{ path: 'f', commits: ['a'.repeat(40), 'b'.repeat(40)] }] } };
+  assert.equal(noteTarget(ch, { kind: 'range' }, 'f'), 'b'.repeat(40));
+  assert.equal(noteTarget(ch, { kind: 'commit', sha: 'a'.repeat(40) }, 'f'), 'a'.repeat(40));
+});
+
+test('large files fold by lines or by size', () => {
+  assert.equal(isLargeFile({ add: 401, del: 0, patch: '' }), true);
+  assert.equal(isLargeFile({ add: 1, del: 0, patch: `@@ -0,0 +1 @@\n+${'x'.repeat(200001)}\n` }), true);
+  assert.equal(isLargeFile({ add: 10, del: 10, patch: '@@' }), false);
+});
+
+test('isSafeSha guards the copied git command', () => {
+  assert.equal(isSafeSha('a'.repeat(40)), true);
+  assert.equal(isSafeSha('a'.repeat(39) + ';'), false);
+});
+
+const SH = 'b'.repeat(40);
+const diffState = () => {
+  const s = stateFor(r2(), null);
+  return s;
+};
+const patches = () => ({
+  published_at: 'p1',
+  commits: [
+    { sha: 'a'.repeat(40), subject: 'a', add: 1, del: 0, files: [{ path: 'f', add: 1, del: 0, binary: false, patch: '@@ -1 +1,2 @@\n x\n+<script>alert(1)</script>\n' }] },
+    { sha: SH, subject: 'b', add: 1, del: 0, files: [{ path: 'g', add: 0, del: 0, binary: false, patch: '' }, { path: 'logo.png', add: 0, del: 0, binary: true }] },
+  ],
+  range: { files: [{ path: 'f', add: 1, del: 0, binary: false, commits: ['a'.repeat(40)], patch: '@@ -1 +1,2 @@\n x\n+<script>alert(1)</script>\n' }] },
+});
+const popup = (over = {}) => ({ view: { kind: 'range' }, folded: {}, editing: null, draftText: '', draftLines: [], warn: null, ...over });
+
+test('the popup escapes patch text and shows the range by default', () => {
+  const html = buildDiff(diffState(), patches(), popup(), false);
+  assert.match(html, /Changes not pushed yet/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>alert/);
+  assert.match(html, /data-sc-act="dclose"/);
+  assert.match(html, /class="sc-diff-backdrop"/);
+});
+
+test('the popup on one commit shows its files, an empty file and a binary file', () => {
+  const html = buildDiff(diffState(), patches(), popup({ view: { kind: 'commit', sha: SH } }), false);
+  assert.match(html, /Commit bbbbbbb · b/);
+  assert.match(html, /No content changes/);
+  assert.match(html, /Binary file, not shown/);
+});
+
+test('without patches the popup shows the counts and the git command', () => {
+  const html = buildDiff(diffState(), null, popup(), false);
+  assert.match(html, /The diff needs the local server/);
+  assert.match(html, /git log -p cccccc/);
+});
+
+test('a saved note shows under its file with its marks, and read only hides the controls', () => {
+  const s = diffState();
+  s.codeNotes[noteKey(noteA)] = noteA;
+  const html = buildDiff(s, patches(), popup({ view: { kind: 'commit', sha: 'a'.repeat(40) } }), false);
+  assert.match(html, /Not like this\./);
+  assert.match(html, /L3/);
+  assert.match(html, /data-sc-act="dnote"/);
+  assert.doesNotMatch(buildDiff(s, patches(), popup({ view: { kind: 'commit', sha: 'a'.repeat(40) } }), true), /data-sc-act="(dnote|ddelete|dmark)"/);
 });
