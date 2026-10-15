@@ -322,3 +322,25 @@ test('a run after the submit finds nothing to do, though the review is no longer
   assert.deepEqual(r.skipped, ['BODY', 'C1', 'C2']);
   assert.equal(writes(calls).length, 0);
 });
+
+const SHA_H = 'd'.repeat(40);
+const withChanges = (over = {}) => ({ ...replyRound2, head: SHA_H, changes: { base: 'e'.repeat(40), head: SHA_H, add: 1, del: 0, commits: [{ sha: SHA_H, subject: 's', files: [] }], range: { files: [] } }, ...over });
+const headIs = (oid) => ({ match: has('pr', 'view', 'headRefOid'), reply: { headRefOid: oid } });
+
+test('publish refuses a change decision and posts nothing', async () => {
+  const p = withChanges();
+  const decisions = { decisions: p.items.map((it, i) => ({ thread_id: it.thread_id, decision: i === 0 ? 'change' : 'hold', reply_en: it.reply_en })), code_notes: [{ sha: SHA_H, path: 'f', view: 'commit', lines: [], text: 'x', thread_ids: [p.items[0].thread_id] }] };
+  const { api } = fakeServer({ proposals: p, decisions });
+  const { gh, calls } = fakeGh([...noPending, headIs(SHA_H)]);
+  await assert.rejects(publish({ gh, api, repo: p.repo, pr: p.pr }), /round 2 asks the agent to change the code of ddddddd.*Nothing was posted/);
+  assert.equal(writes(calls).length, 0);
+});
+
+test('publish refuses when GitHub has another head than the one the user approved', async () => {
+  const p = withChanges();
+  const decisions = { decisions: p.items.map((it) => ({ thread_id: it.thread_id, decision: 'publish', reply_en: it.reply_en })) };
+  const { api } = fakeServer({ proposals: p, decisions });
+  const { gh, calls } = fakeGh([...noPending, headIs('9'.repeat(40))]);
+  await assert.rejects(publish({ gh, api, repo: p.repo, pr: p.pr }), /GitHub has 9999999 but the user approved ddddddd/);
+  assert.equal(writes(calls).length, 0);
+});
