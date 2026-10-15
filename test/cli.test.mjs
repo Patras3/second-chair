@@ -552,3 +552,32 @@ test('push links the tab where the cards are, and prints the server refusal', as
     await cleanup(root);
   }
 });
+
+test('build refuses a derived verdict', () => {
+  assert.throws(() => buildPayload({ repo: 'o/n', pr: 1, round: 2, head: 'h', items: [{ thread_id: 'T1', reply_en: 'x', verdict: 'change' }] }), /T1: verdict change is set by the user's notes on the code/);
+});
+
+test('build --base adds the changes and full shas, only in round 2 of respond mode', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sc-build-'));
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' };
+  const git = (...a) => run('git', a, { cwd: dir, env }).then((r) => r.stdout.trim());
+  try {
+    await git('init', '-q', '-b', 'main');
+    await writeFile(join(dir, 'a.txt'), 'a\n');
+    await git('add', '.'); await git('commit', '-qm', 'base');
+    const base = await git('rev-parse', 'HEAD');
+    await writeFile(join(dir, 'a.txt'), 'b\n');
+    await git('add', '.'); await git('commit', '-qm', 'fix');
+    const head = await git('rev-parse', 'HEAD');
+    await writeFile(join(dir, 'items.json'), JSON.stringify([{ thread_id: 'T1', reply_en: 'Fixed.', verdict: 'publish', commits: [head.slice(0, 7)] }]));
+    const out = await run(process.execPath, [BIN, 'build', '--repo', 'o/n', '--pr', '1', '--round', '2', '--head', head, '--base', base, 'items.json'], { cwd: dir, env });
+    const p = JSON.parse(out.stdout);
+    assert.equal(p.changes.head, head);
+    assert.deepEqual(p.items[0].commits, [head]);
+    assert.equal(p.changes.commits[0].files[0].path, 'a.txt');
+    const r1 = await run(process.execPath, [BIN, 'build', '--repo', 'o/n', '--pr', '1', '--round', '1', '--head', head, '--base', base, 'items.json'], { cwd: dir, env }).catch((e) => e);
+    assert.match(r1.stderr, /--base applies only to round 2 of respond mode/);
+  } finally {
+    await cleanup(dir);
+  }
+});
