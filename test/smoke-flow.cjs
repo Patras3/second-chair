@@ -1,5 +1,6 @@
 // Flow smoke test: the phases of a round in a real browser against a real server. Whose turn it is, the waiting
-// footer, the next round loading by itself, Edit and send again, publishing and done, and polling.
+// footer, the agent waiting in the terminal, the next round loading by itself, Edit and send again, publishing and
+// done, and polling.
 // Run: PLAYWRIGHT=/path/to/node_modules/playwright node test/smoke-flow.cjs
 const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
 const fs = require('fs');
@@ -145,6 +146,22 @@ async function decideAndSend(page, key) {
   await api('GET', '/api/decisions?repo=acme/w&pr=7&round=1');
   check(await within(page, () => /picked up your decisions/.test(document.querySelector('.sc-status')?.textContent ?? '')), 'the page shows that the agent picked the decisions up');
 
+  // 2b. The agent stops for you in the terminal: the status line, the pill, the footer, the tab title and a
+  // notification say so, and the spinner comes back once the request is gone.
+  await page.evaluate(() => { document.hasFocus = () => false; });
+  await api('POST', '/api/attention', { repo: 'acme/w', pr: 7, message: 'Which name do you want?' });
+  check(await within(page, () => /^Your turn in the terminal\./.test(document.querySelector('.sc-status')?.textContent ?? '')), 'the status line says the agent waits in the terminal');
+  check(/Which name do you want\?/.test(await text(page, '.sc-status-attention')), 'with the agent\'s message');
+  check((await text(page, '.sc-toggle')).includes('needs you') && await page.locator('.sc-toggle.sc-attn').count() === 1, 'the pill says needs you');
+  check(/needs you in the terminal/.test(await text(page, '.sc-wait')) && await page.locator('.sc-spin').count() === 0, 'the footer has no spinner');
+  check((await page.title()).startsWith('(!)'), 'the tab title is marked');
+  check((await page.evaluate(() => window.__notes ?? [])).some((n) => /needs you in the terminal\. Which name/.test(n)), 'a notification went out');
+  await api('DELETE', '/api/attention?repo=acme/w&pr=7');
+  check(await within(page, () => document.querySelector('.sc-spin') !== null), 'once cleared, the spinner is back');
+  check(!(await page.title()).startsWith('(!)'), 'and the title mark is gone');
+  check((await page.evaluate(() => window.__notes.length)) === 1, 'one notification per request');
+  await page.evaluate(() => { delete document.hasFocus; });
+
   // 5. Edit and send again after the pick-up: a warning, then a revision the agent must read.
   let warned = '';
   page.once('dialog', (d) => { warned = d.message(); d.accept(); });
@@ -289,11 +306,12 @@ async function decideAndSend(page, key) {
   check(await ed.evaluate(() => !window.__eaten), 'the page code never saw a click on our controls');
   await ed.close();
 
-  // 9. Polling pauses while the tab is hidden and resumes at once when it is visible.
+  // 9. Polling slows down while the tab is hidden, and resumes at once when it is visible.
   await tabA.evaluate(() => { const orig = window.__gmx; window.__calls = 0; window.__gmx = (r) => { window.__calls++; return orig(r); }; });
   await tabA.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); window.__calls = 0; });
   await tabA.waitForTimeout(6500);
-  check(await tabA.evaluate(() => window.__calls) === 0, 'a hidden tab does not poll');
+  check(await tabA.evaluate(() => window.__calls) === 0, 'a hidden tab does not poll at the visible pace');
+  check(await within(tabA, () => window.__calls > 0, undefined, 26000), 'but it still polls every 30 s, so a notification can reach you');
   await tabA.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
   check(await within(tabA, () => window.__calls > 0, undefined, 1500), 'a visible tab polls at once');
 

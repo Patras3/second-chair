@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- The page says when the agent needs you in the terminal. The status line reads **Your turn in the terminal** with the agent's line, the pill says **needs you**, the spinner goes, the tab title starts with `(!)`, and a desktop notification goes out when you look elsewhere. `second-chair attention` sets it, a failed `publish` sets it, and so does the plugin's new `Notification` hook when Claude Code waits for input or a permission. Typing in that session, the next push, a publish or a close clears it.
+- A desktop notification when the agent's next round arrives while you look elsewhere.
+- `second-chair hook` for the agent's hooks, and `POST /api/session`. `push`, `wait` and `get` tell the server which agent session works on a pull request (`SECOND_CHAIR_SESSION` or `CLAUDE_CODE_SESSION_ID`).
+
+Changed:
+
+- A hidden tab keeps polling, every 30 seconds instead of every 5, so a notification can reach you.
+- The skills run `second-chair attention` before they stop to ask you something while a round is with the agent.
+
 ## 1.2.0
 
 Added:

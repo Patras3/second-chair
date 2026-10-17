@@ -368,3 +368,73 @@ test('decisions that answer an older publication of the round are refused', asyn
   assert.equal((await call('POST', '/api/decisions', decisionsFor(p, { published_at: now }))).status, 200);
   assert.equal((await call('POST', '/api/decisions', decisionsFor(p))).status, 200, 'a 1.0 page sends no published_at, and is not checked');
 });
+
+test('attention is set, read and cleared, and needs proposals first', async () => {
+  assert.equal((await call('POST', '/api/attention', { repo: 'acme/w', pr: 201, message: 'x' })).status, 404, 'no panel to show it in');
+  await call('PUT', '/api/proposals', proposals({ pr: 201 }));
+  assert.deepEqual((await call('GET', '/api/attention?repo=acme/w&pr=201')).body, { attention: null });
+  const set = await call('POST', '/api/attention', { repo: 'acme/w', pr: 201, message: `  ${'m'.repeat(400)}  ` });
+  assert.equal(set.status, 200);
+  const got = (await call('GET', '/api/attention?repo=acme/w&pr=201')).body.attention;
+  assert.equal(got.at, set.body.at);
+  assert.equal(got.source, 'agent');
+  assert.equal(got.message.length, 300, 'the message is trimmed and capped');
+  assert.equal((await call('DELETE', '/api/attention?repo=acme/w&pr=201')).status, 200);
+  assert.equal((await call('GET', '/api/attention?repo=acme/w&pr=201')).body.attention, null);
+  assert.equal((await call('POST', '/api/attention', { repo: 'acme/w', pr: 201, source: 'me' })).status, 400);
+  assert.equal((await call('POST', '/api/attention', { repo: 'acme/w', pr: 201, message: 7 })).status, 400);
+  assert.equal((await call('GET', '/api/attention?repo=acme/w')).status, 400);
+});
+
+test('a push, a publish record and a close each clear the attention', async () => {
+  const p = proposals({ pr: 202 });
+  const ask = () => call('POST', '/api/attention', { repo: 'acme/w', pr: 202 });
+  const asked = async () => (await call('GET', '/api/attention?repo=acme/w&pr=202')).body.attention !== null;
+  await call('PUT', '/api/proposals', p);
+  await ask();
+  await call('PUT', '/api/proposals', p);
+  assert.equal(await asked(), false, 'push');
+  await ask();
+  await call('POST', '/api/published', { repo: 'acme/w', pr: 202, round: 1, thread_id: 'T1', action: 'replied' });
+  assert.equal(await asked(), false, 'publish');
+  await ask();
+  assert.ok((await call('GET', '/api/status')).body.find((s) => s.pr === 202).attention_at, 'status shows it');
+  await call('POST', '/api/close', { repo: 'acme/w', pr: 202 });
+  assert.equal(await asked(), false, 'close');
+});
+
+test('a session hook marks only the pull requests whose decisions that session holds, and clears them when the user is back', async () => {
+  const sid = 'sess-1';
+  const held = proposals({ pr: 203 });
+  await call('PUT', `/api/proposals?session=${sid}`, held);
+  await call('POST', '/api/decisions', decisionsFor(held));
+  // Sent but this session never pushed or read it: another agent's work.
+  const other = proposals({ pr: 204 });
+  await call('PUT', '/api/proposals?session=sess-2', other);
+  await call('POST', '/api/decisions', decisionsFor(other));
+  // Pushed by this session, but the user has not sent yet: the user's turn, not the agent's.
+  await call('PUT', `/api/proposals?session=${sid}`, proposals({ pr: 205 }));
+  const r = await call('POST', '/api/session', { session: sid, event: 'waiting', message: 'Claude needs your permission to use Bash' });
+  assert.deepEqual(r.body, { ok: true, prs: [{ repo: 'acme/w', pr: 203 }] });
+  const a = (await call('GET', '/api/attention?repo=acme/w&pr=203')).body.attention;
+  assert.equal(a.source, 'hook');
+  assert.equal(a.message, 'Claude needs your permission to use Bash');
+  for (const pr of [204, 205]) assert.equal((await call('GET', `/api/attention?repo=acme/w&pr=${pr}`)).body.attention, null);
+  await call('POST', '/api/session', { session: sid, event: 'back' });
+  assert.equal((await call('GET', '/api/attention?repo=acme/w&pr=203')).body.attention, null);
+  assert.equal((await call('POST', '/api/session', { session: 'bad id!', event: 'waiting' })).status, 400);
+  assert.equal((await call('POST', '/api/session', { session: sid, event: 'nap' })).status, 400);
+});
+
+test('reading the decisions moves the work to the reading session, and a hook keeps the agent message', async () => {
+  const p = proposals({ pr: 206 });
+  await call('PUT', '/api/proposals?session=old', p);
+  await call('POST', '/api/decisions', decisionsFor(p));
+  await call('GET', '/api/decisions?repo=acme/w&pr=206&round=1&peek=1&session=peeker');
+  assert.deepEqual((await call('POST', '/api/session', { session: 'peeker', event: 'waiting' })).body.prs, [], 'the page peeks, it holds nothing');
+  await call('GET', '/api/decisions?repo=acme/w&pr=206&round=1&session=new');
+  assert.deepEqual((await call('POST', '/api/session', { session: 'old', event: 'waiting' })).body.prs, []);
+  await call('POST', '/api/attention', { repo: 'acme/w', pr: 206, message: 'Which name do you want?' });
+  assert.deepEqual((await call('POST', '/api/session', { session: 'new', event: 'waiting', message: 'Claude is waiting for your input' })).body.prs, [{ repo: 'acme/w', pr: 206 }]);
+  assert.equal((await call('GET', '/api/attention?repo=acme/w&pr=206')).body.attention.message, 'Which name do you want?');
+});

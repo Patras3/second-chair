@@ -17,6 +17,7 @@ This skill does not say how to review. The findings come from you, from another 
 - Never add `--submit` on your own after an error. This holds for every error, including the one about a missing review body.
 - Never create a second pending review. `second-chair draft` adds to the existing one.
 - Never touch reviews or comments by other people.
+- When you stop to ask the user something, or to wait for their instruction, while the work is with you (the user sent a round, and you have not pushed the next one or closed), first run `second-chair attention --repo O/N --pr N --message "<one line: what you need>"`. The panel then tells the user to come to the terminal, instead of a spinner that never ends. The next `push`, `publish` or `close` clears it. A failed `publish` sets it by itself. So does the plugin's hook when Claude Code waits for input or permission, but your line says more.
 
 ## Steps
 
@@ -66,4 +67,4 @@ The user can send a round again while you work on it (**Edit and send again**). 
 3. Change the work to match: rewrite or restore the comments.
 4. Tell the user what changed, then build and push again. When the changed decisions are round 2's and hold no `revise` any more, do not push: go on with `publish`.
 
-For any other error, show the user the message and wait for their instruction.
+For any other error, run `second-chair attention` with a one-line summary, show the user the message, and wait for their instruction.

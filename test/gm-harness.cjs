@@ -19,7 +19,7 @@ function nodeRequest(port, { method, url, headers, data }) {
 
 /**
  * Installs the GM_* stubs on a page before its scripts run. `store` is the starting GM storage as a JSON string,
- * or null. Port 0 means no server: every request fails. The page exposes `window.__store` and `window.__clip`.
+ * or null. Port 0 means no server: every request fails. The page exposes `window.__store`, `window.__clip` and `window.__notes`.
  */
 async function installGm(page, port, store) {
   await page.exposeFunction('__gmx', (req) => (port ? nodeRequest(port, req) : Promise.resolve({ ok: false })));
@@ -29,6 +29,7 @@ async function installGm(page, port, store) {
     window.GM_setValue = (k, v) => { store[k] = v; };
     window.GM_deleteValue = (k) => { delete store[k]; };
     window.GM_setClipboard = (t) => { window.__clip = t; };
+    window.GM_notification = (o) => { (window.__notes = window.__notes || []).push(o.text); };
     window.GM_xmlhttpRequest = (o) => {
       window.__gmx({ method: o.method, url: o.url, headers: o.headers, data: o.data }).then((r) => (r.ok ? o.onload({ status: r.status, responseText: r.responseText }) : o.onerror()));
     };

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { health, isOlder, probe, start, stop } from '../lib/daemon.mjs';
 import { buildPayload } from '../lib/payload.mjs';
-import { draftArgs } from '../lib/cli.mjs';
+import { draftArgs, hookEvent, sessionId } from '../lib/cli.mjs';
 import { startServer } from '../lib/server.mjs';
 
 const run = promisify(execFile);
@@ -580,4 +580,67 @@ test('build --base adds the changes and full shas, only in round 2 of respond mo
   } finally {
     await cleanup(dir);
   }
+});
+
+test('the session comes from SECOND_CHAIR_SESSION or Claude Code, and a hook event maps to waiting or back', () => {
+  assert.equal(sessionId({ SECOND_CHAIR_SESSION: 'mine', CLAUDE_CODE_SESSION_ID: 'cc' }), 'mine');
+  assert.equal(sessionId({ CLAUDE_CODE_SESSION_ID: '0f8e2c1a-5b3d-4e7f-9a6b-2c4d8e1f3a5b' }), '0f8e2c1a-5b3d-4e7f-9a6b-2c4d8e1f3a5b');
+  assert.equal(sessionId({ SECOND_CHAIR_SESSION: 'no spaces please' }), null);
+  assert.equal(sessionId({}), null);
+  assert.deepEqual(hookEvent({ session_id: 's1', hook_event_name: 'Notification', message: 'Claude is waiting for your input' }), { session: 's1', event: 'waiting', message: 'Claude is waiting for your input' });
+  assert.deepEqual(hookEvent({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: 'hi' }), { session: 's1', event: 'back' });
+  assert.equal(hookEvent({ session_id: 's1', hook_event_name: 'Stop' }), null);
+  assert.equal(hookEvent({ hook_event_name: 'Notification' }), null);
+  assert.equal(hookEvent(null), null);
+});
+
+test('attention marks the panel, the hook marks and clears it silently, and a failed publish marks it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sc-cli-'));
+  const port = await freePort();
+  const env = { ...process.env, SECOND_CHAIR_HOME: root, SECOND_CHAIR_PORT: String(port), SECOND_CHAIR_SESSION: 'cli-sess' };
+  const server = await startServer({ port, root, log: () => {} });
+  const H = { 'Content-Type': 'application/json', 'X-Second-Chair': '1' };
+  const attention = async () => (await (await fetch(`http://127.0.0.1:${port}/api/attention?repo=acme/w&pr=7`, { headers: H })).json()).attention;
+  const hook = (input) => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [BIN, 'hook'], { env });
+    let out = '';
+    child.stdout.on('data', (c) => { out += c; });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, out }));
+    child.stdin.end(typeof input === 'string' ? input : JSON.stringify(input));
+  });
+  try {
+    const refused = await run(process.execPath, [BIN, 'attention', '--repo', 'acme/w', '--pr', '7'], { env }).catch((e) => e);
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /refused: no proposals for this pull request/);
+    const file = join(root, 'p.json');
+    await writeFile(file, JSON.stringify({ tool: 'second-chair', kind: 'proposals', repo: 'acme/w', pr: 7, round: 1, head: 'h', items: [{ thread_id: 'T1', comment_id: 1, verdict: 'reply', reply_en: 'x' }] }));
+    await run(process.execPath, [BIN, 'push', file], { env });
+    const ok = await run(process.execPath, [BIN, 'attention', '--repo', 'acme/w', '--pr', '7', '--message', 'Which name do you want?'], { env });
+    assert.match(ok.stdout, /now says that you wait for the user in the terminal/);
+    assert.equal((await attention()).message, 'Which name do you want?');
+    await run(process.execPath, [BIN, 'attention', '--repo', 'acme/w', '--pr', '7', '--clear'], { env });
+    assert.equal(await attention(), null);
+
+    // The push recorded this session. Once the user sent and the agent read, the hook finds the pull request.
+    await fetch(`http://127.0.0.1:${port}/api/decisions`, { method: 'POST', headers: H, body: JSON.stringify({ tool: 'second-chair', kind: 'decisions', repo: 'acme/w', pr: 7, round: 1, head: 'h', decisions: [{ thread_id: 'T1', decision: 'reply', note: '' }] }) });
+    await run(process.execPath, [BIN, 'get', '--repo', 'acme/w', '--pr', '7', '--round', '1'], { env });
+    assert.deepEqual(await hook({ session_id: 'cli-sess', hook_event_name: 'Notification', message: 'Claude needs your permission to use Bash' }), { code: 0, out: '' });
+    assert.equal((await attention()).source, 'hook');
+    assert.deepEqual(await hook({ session_id: 'cli-sess', hook_event_name: 'UserPromptSubmit', prompt: 'go on' }), { code: 0, out: '' });
+    assert.equal(await attention(), null);
+    assert.deepEqual(await hook('not json'), { code: 0, out: '' }, 'bad input stays silent');
+
+    // Round 1 is the latest, so publish stops before it touches GitHub, and the page says the agent stopped.
+    const pub = await run(process.execPath, [BIN, 'publish', '--repo', 'acme/w', '--pr', '7'], { env }).catch((e) => e);
+    assert.equal(pub.code, 1);
+    const a = await attention();
+    assert.equal(a.source, 'error');
+    assert.match(a.message, /^publish stopped: publish needs round 2 proposals/);
+  } finally {
+    server.close();
+  }
+  // No server: the hook still exits 0 and prints nothing.
+  assert.deepEqual(await hook({ session_id: 'cli-sess', hook_event_name: 'Notification' }), { code: 0, out: '' });
+  await cleanup(root);
 });

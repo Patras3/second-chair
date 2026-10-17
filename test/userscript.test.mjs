@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 // Evaluate the script with no `document`, so the DOM bootstrap stays dormant, and pull out the pure helpers.
 const source = readFileSync(new URL('../userscript/second-chair.user.js', import.meta.url), 'utf8');
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'buildPushRow', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor', 'notesFor', 'noteKey', 'withoutPatches', 'hasPatches', 'splitPatches', 'parsePatch', 'markLabel', 'noteTarget', 'isLargeFile', 'diffFiles', 'isSafeSha', 'buildDiff'];
-const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, buildPushRow, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor, notesFor, noteKey, withoutPatches, hasPatches, splitPatches, parsePatch, markLabel, noteTarget, isLargeFile, diffFiles, isSafeSha, buildDiff } =
+const NAMES = ['SC_LOGO', 'SC_DECISIONS', 'SC_MODE_NAME', 'doneInfo', 'parseLocation', 'parsePayload', 'stateFor', 'isNewer', 'progress', 'buildExport', 'buildCard', 'buildPanelList', 'buildFilterBar', 'buildPushRow', 'groupItems', 'displayOrder', 'SC_DONE_REASON', 'threadLinks', 'richText', 'renderMarkdown', 'effective', 'visibleItems', 'step', 'rowsFor', 'hasRevise', 'phaseOf', 'statusOf', 'publishedSummary', 'submitLock', 'buildYourReview', 'emptyPanel', 'tourSteps', 'tourKey', 'buildTourTip', 'tourIntro', 'buildTourIntro', 'choicesFor', 'notesFor', 'noteKey', 'withoutPatches', 'hasPatches', 'splitPatches', 'parsePatch', 'markLabel', 'noteTarget', 'isLargeFile', 'diffFiles', 'isSafeSha', 'buildDiff', 'attentionOf', 'titleWith'];
+const { SC_LOGO, SC_DECISIONS, SC_MODE_NAME, doneInfo, parseLocation, parsePayload, stateFor, isNewer, progress, buildExport, buildCard, buildPanelList, buildFilterBar, buildPushRow, groupItems, displayOrder, SC_DONE_REASON, threadLinks, richText, renderMarkdown, effective, visibleItems, step, rowsFor, hasRevise, phaseOf, statusOf, publishedSummary, submitLock, buildYourReview, emptyPanel, tourSteps, tourKey, buildTourTip, tourIntro, buildTourIntro, choicesFor, notesFor, noteKey, withoutPatches, hasPatches, splitPatches, parsePatch, markLabel, noteTarget, isLargeFile, diffFiles, isSafeSha, buildDiff, attentionOf, titleWith } =
   new Function(`${source}\nreturn { ${NAMES.map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`)();
 
 const payload = (over = {}) => ({
@@ -470,6 +470,30 @@ test('the status line names whose turn it is', () => {
   rp.submit = 'COMMENT';
   assert.match(statusOf(rp, 'publishing').text, /updates your draft review on GitHub\. Then it submits it as Comment\./);
   assert.equal(statusOf(s, 'done', { published: { items: {} } }).who, null);
+});
+
+test('the status line says the agent waits in the terminal, only while the work is with the agent', () => {
+  const s = at(1);
+  s.sentAt = '2026-10-07T08:09:00Z';
+  const live = { attention: { at: '2026-10-07T08:10:00Z', message: 'Which name do you want?', source: 'agent' } };
+  const st = statusOf(s, 'waiting', live);
+  assert.equal(st.who, 'attention');
+  assert.match(st.text, /^Your turn in the terminal\. The agent stopped and waits for you there, since .*\nWhich name do you want\?$/);
+  assert.doesNotMatch(statusOf(s, 'waiting', { attention: { at: 't', message: null } }).text, /\n/);
+  assert.equal(statusOf(decideAll(at(2), 'publish'), 'publishing', live).who, 'attention');
+  assert.match(statusOf(stateFor(review({ round: 2 }), null), 'publishing', live).warn, /Do not submit/, 'a stopped publish has not submitted yet');
+  assert.equal(statusOf(at(1), 'decide', live).who, 'you', 'your turn in the browser wins');
+  assert.equal(attentionOf('done', live), null);
+  assert.equal(attentionOf('waiting', {}), null);
+  assert.equal(attentionOf('publishing', live), live.attention);
+});
+
+test('titleWith adds the mark once and takes it off', () => {
+  assert.equal(titleWith('Fix it · Pull Request #7', true), '(!) Fix it · Pull Request #7');
+  assert.equal(titleWith('(!) Fix it · Pull Request #7', true), '(!) Fix it · Pull Request #7');
+  assert.equal(titleWith('(!) Fix it · Pull Request #7', false), 'Fix it · Pull Request #7');
+  assert.equal(titleWith('Fix it', false), 'Fix it');
+  assert.equal(titleWith('(!)', false), '', 'an empty title marked and trimmed by the browser');
 });
 
 test('publishedSummary counts what reached GitHub', () => {

@@ -173,6 +173,18 @@ The pill then reads **✓ done**. The panel shows a purple **Done** banner with 
 
 <img src="docs/images/done.png" width="420" alt="The side panel after the final round: a Done banner and a read-only list of decisions with their commits">
 
+## When the agent needs you
+
+Sometimes the agent stops in the middle of a round: it has a question, it waits for a permission, or `publish` failed. You may still be on GitHub, watching a spinner. Second Chair tells you to go back to the terminal:
+
+- The status line says **Your turn in the terminal**, with the agent's line, and the footer loses its spinner.
+- The pill says **needs you**, and the tab title starts with `(!)`.
+- When you look at another tab or window, a desktop notification says the same. A new round that arrives meanwhile gets a notification too.
+
+A hidden tab asks the server every 30 seconds, so the notification reaches you even when you are not looking at GitHub. The request goes away when you type in the agent's terminal, or when the agent pushes the next round, publishes or closes.
+
+The plugin's hooks see when Claude Code waits for you, and the skills tell the agent to say what it needs with `second-chair attention`. Notifications go through the script manager. When none show, check that the browser may show notifications.
+
 ## Keyboard
 
 The keys work when the panel is open and the focus is not in a text field.
@@ -216,6 +228,8 @@ With the plugin alone, these commands run inside Claude Code. See [Where the com
 | `second-chair put-decisions <decisions.json>` | Hands the decisions from the clipboard to the server. The page puts them there when the server is down. Prints the server's reason when it refuses them. |
 | `second-chair publish --repo O/N --pr N [--submit EVENT]` | Carries out the final round's decisions on GitHub, once. In review mode it submits the review with the event you chose in the panel. `--submit` with `COMMENT`, `APPROVE` or `REQUEST_CHANGES` does the same, and must agree with your choice. It refuses a round 2 that asks for a new version. |
 | `second-chair close --repo O/N --pr N` | Marks the work on the pull request done. The page hides its cards. |
+| `second-chair attention --repo O/N --pr N [--message TEXT] [--clear]` | Tells the page that the agent waits for you in the terminal, with a one-line message. `--clear` takes it back. The next `push`, `publish` or `close` clears it too. |
+| `second-chair hook` | For the agent's hooks. Reads the hook event on stdin, prints nothing, and always exits 0. |
 | `second-chair status` | Lists the pull requests and rounds on the server. |
 
 `PR` is a pull request number or URL. Without it, the commands use the pull request of the current branch. `--repo O/N --pr N` works too.
@@ -226,6 +240,7 @@ Settings:
 
 - `SECOND_CHAIR_PORT`: the server port. The default is `7788`.
 - `SECOND_CHAIR_HOME`: the data directory. The default is `${XDG_DATA_HOME:-~/.local/share}/second-chair`.
+- `SECOND_CHAIR_SESSION`: the agent session id, so the hooks find the session's pull requests. Claude Code sets `CLAUDE_CODE_SESSION_ID`, which the command uses when this is not set.
 
 ## Run it as a service
 
@@ -292,7 +307,7 @@ The server is reachable only from the machine it runs on. A server started insid
 
 One Second Chair server runs per machine. Every Claude Code session shares it, in every repository. The first session starts it, and later sessions find it running.
 
-The server keeps its data per repository and pull request. Sessions that work on different pull requests do not get in each other's way.
+The server keeps its data per repository and pull request. Sessions that work on different pull requests do not get in each other's way. The server also remembers which session works on each pull request, so a session that waits for you marks only its own pull requests as **needs you**.
 
 When several sessions start at the same moment, each one tries to start a server. One server gets the port, and every session uses it.
 

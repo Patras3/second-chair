@@ -12,6 +12,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_setClipboard
 // @grant        GM_xmlhttpRequest
+// @grant        GM_notification
 // @connect      127.0.0.1
 // @connect      localhost
 // @updateURL    http://127.0.0.1:7788/second-chair.user.js
@@ -404,14 +405,34 @@ function publishedSummary(state, published) {
   return `Posted ${plural(posted, 'reply', 'replies')}.${rest ? ` ${rest} not posted.` : ''}`;
 }
 
+/** The agent's request to come to the terminal, while the work is with the agent; null otherwise. */
+function attentionOf(phase, live = {}) {
+  return (phase === 'waiting' || phase === 'publishing') && live.attention ? live.attention : null;
+}
+
+const SC_TITLE_MARK = '(!) ';
+const SC_ATTN_WAIT = '<div class="sc-wait sc-wait-attn">⚠ The agent needs you in the terminal</div>';
+
+/** The tab title with the mark that the agent needs you, or without it. */
+function titleWith(title, on) {
+  // The browser trims the title, so a mark on an empty title reads back as "(!)".
+  const bare = title.replace(/^\(!\)\s*/, '');
+  return on ? SC_TITLE_MARK + bare : bare;
+}
+
 /** The status line: whose turn it is and what happens, plus a warning that stays while it matters. */
 function statusOf(state, phase, live = {}) {
   const p = state.payload;
   const review = modeOf(p) === 'review';
   const round1 = p.round < SC_FINAL_ROUND;
-  const warn = review && (phase === 'decide' || phase === 'waiting') ? 'Do not submit the review on GitHub yet. It still holds comments you have not decided.' : null;
+  const warn = review && (phase === 'decide' || phase === 'waiting' || attentionOf(phase, live)) ? 'Do not submit the review on GitHub yet. It still holds comments you have not decided.' : null;
   let who = null;
   let text = '';
+  const asks = attentionOf(phase, live);
+  if (asks) {
+    // The agent stopped for you. Without this line the page would show a spinner that never ends.
+    return { who: 'attention', text: `Your turn in the terminal. The agent stopped and waits for you there, since ${formatTime(asks.at)}.${asks.message ? `\n${asks.message}` : ''}`, warn };
+  }
   if (phase === 'decide') {
     who = 'you';
     text = review
@@ -880,6 +901,7 @@ function emptyPanel(loc, serverUp) {
 const SC_CSS = `
 .sc-toggle{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;align-items:center;gap:6px;height:32px;padding:0 12px 0 10px;border-radius:16px;border:1px solid var(--borderColor-default,#d0d7de);background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);font:600 12px/1 -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:var(--shadow-floating-small,0 2px 8px rgba(0,0,0,.15))}
 .sc-toggle.sc-complete{color:var(--fgColor-success,#1a7f37);border-color:var(--fgColor-success,#1a7f37)}
+.sc-toggle.sc-attn{color:var(--fgColor-attention,#9a6700);border-color:var(--borderColor-attention-emphasis,#d4a72c);background:var(--bgColor-attention-muted,#fff8c5)}
 .sc-panel{position:fixed;top:0;right:0;bottom:0;width:min(440px,92vw);z-index:9998;display:flex;flex-direction:column;background:var(--bgColor-default,#fff);color:var(--fgColor-default,#1f2328);border-left:1px solid var(--borderColor-default,#d0d7de);box-shadow:var(--shadow-floating-large,-4px 0 16px rgba(0,0,0,.12));font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
 .sc-panel.sc-wide{width:50vw}.sc-panel[hidden]{display:none}
 html.sc-shift-narrow body{margin-right:min(440px,92vw)!important}html.sc-shift-wide body{margin-right:50vw!important}
@@ -938,6 +960,8 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-lock{margin-top:6px;font-size:12px;color:var(--fgColor-attention,#9a6700)}
 .sc-status{margin-top:8px;font-size:13px}.sc-status-warn{margin-top:4px;color:var(--fgColor-attention,#9a6700)}
 .sc-wait{display:flex;align-items:center;justify-content:center;gap:8px;height:32px;font-weight:600}
+.sc-status-attention{padding:6px 10px;border:1px solid var(--borderColor-attention-emphasis,#d4a72c);border-radius:6px;background:var(--bgColor-attention-muted,#fff8c5)}
+.sc-wait-attn{color:var(--fgColor-attention,#9a6700)}
 .sc-spin{width:12px;height:12px;border:2px solid var(--borderColor-default,#d0d7de);border-top-color:var(--fgColor-accent,#0969da);border-radius:50%;animation:sc-spin 1s linear infinite}
 @keyframes sc-spin{to{transform:rotate(360deg)}}
 .sc-msg{margin:10px 14px 0;font-size:12px}.sc-msg.sc-err{color:var(--fgColor-danger,#d1242f)}
@@ -1062,9 +1086,12 @@ function secondChairBootstrap() {
   let rendering = false;
   let timer = null;
   let pollTimer = null;
-  // What polling learned about this round: when the agent picked the decisions up, and what publish recorded.
-  let live = { pickedUpAt: null, revision: null, published: null };
+  // What polling learned about this round: when the agent picked the decisions up, what publish recorded, and
+  // whether the agent stopped to wait for you in the terminal.
+  let live = { pickedUpAt: null, revision: null, published: null, attention: null };
   const POLL_MS = 5000;
+  // A hidden tab still polls, slower, so a request from the agent or a new round can reach you as a notification.
+  const POLL_HIDDEN_MS = 30000;
   // Inline cards that are unfolded, and threads whose card is open in the panel: two separate things.
   const expanded = new Set();
   const panelOpen = new Set();
@@ -1280,11 +1307,15 @@ function secondChairBootstrap() {
     const ph = phase();
     const info = doneInfo(state);
     const pr = state ? progress(state) : null;
-    toggle.innerHTML = `${SC_LOGO} ${{ empty: '–', decide: pr ? `${pr.done}/${pr.total}` : '', waiting: 'waiting', publishing: 'publishing', done: '✓ done' }[ph]}`;
+    const asks = attentionOf(ph, live);
+    toggle.innerHTML = `${SC_LOGO} ${asks ? 'needs you' : { empty: '–', decide: pr ? `${pr.done}/${pr.total}` : '', waiting: 'waiting', publishing: 'publishing', done: '✓ done' }[ph]}`;
     toggle.classList.toggle('sc-complete', Boolean(ph === 'decide' && pr.complete));
+    toggle.classList.toggle('sc-attn', Boolean(asks));
+    toggle.title = asks ? 'The agent waits for you in the terminal' : '';
+    markTitle(Boolean(asks));
     const pct = (n) => (pr && pr.total ? (100 * n) / pr.total : 0);
     const st = state && ph !== 'done' ? statusOf(state, ph, live) : null;
-    const status = st ? `<div class="sc-status sc-status-${st.who}">${richText(st.text).replace(/^(Your turn\.|Agent&#39;s turn\.)/, '<b>$1</b>')}</div>${st.warn ? `<div class="sc-status sc-status-warn">${esc(st.warn)}</div>` : ''}` : '';
+    const status = st ? `<div class="sc-status sc-status-${st.who}">${richText(st.text).replace(/^(Your turn in the terminal\.|Your turn\.|Agent&#39;s turn\.)/, '<b>$1</b>')}</div>${st.warn ? `<div class="sc-status sc-status-warn">${esc(st.warn)}</div>` : ''}` : '';
     const head = `<div class="sc-panel-head">
   <div class="sc-hrow">${SC_LOGO}<b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${SC_MODE_NAME[modeOf(state.payload)]} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
     ${info ? '<span class="sc-label sc-done-label">✓ Done</span>' : ''}
@@ -1312,9 +1343,10 @@ function secondChairBootstrap() {
       foot = `<div class="sc-panel-foot"><button type="button" class="sc-primary" data-sc-act="export" ${pr.complete && !lock ? '' : 'disabled'}>${sendLabel(pr)}</button><div class="sc-lock"${lock ? '' : ' hidden'}>${esc(lock ?? '')}</div>${keys}</div>`;
     } else if (ph === 'waiting') {
       const what = state.payload.round < SC_FINAL_ROUND ? `Waiting for round ${state.payload.round + 1}` : `Waiting for the new round ${state.payload.round}`;
-      foot = `<div class="sc-panel-foot"><div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>${what}</div><div class="sc-keys"><button type="button" class="sc-link" data-sc-act="resend">Edit and send again</button></div></div>`;
+      const wait = asks ? SC_ATTN_WAIT : `<div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>${what}</div>`;
+      foot = `<div class="sc-panel-foot">${wait}<div class="sc-keys"><button type="button" class="sc-link" data-sc-act="resend">Edit and send again</button></div></div>`;
     } else if (ph === 'publishing') {
-      foot = '<div class="sc-panel-foot"><div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>The agent is publishing</div></div>';
+      foot = `<div class="sc-panel-foot">${asks ? SC_ATTN_WAIT : '<div class="sc-wait"><span class="sc-spin" aria-hidden="true"></span>The agent is publishing</div>'}</div>`;
     } else if (ph === 'done') {
       foot = '<div class="sc-panel-foot sc-muted sc-small">Read only. A new proposal from the agent reopens this pull request.</div>';
     }
@@ -1452,7 +1484,8 @@ function secondChairBootstrap() {
         message = { text: res.payload.round === before.round ? `A new round ${res.payload.round} is here.` : `Round ${res.payload.round} is here.` };
         panelShown = true;
       } else message = { text: `Loaded ${res.payload.items.length} ${modeOf(res.payload) === 'review' ? 'review comments' : 'threads'}, round ${res.payload.round}, from the ${source}.` };
-      live = { pickedUpAt: null, revision: null, published: newRound ? null : live.published };
+      live = { pickedUpAt: null, revision: null, published: newRound ? null : live.published, attention: null };
+      if (newRound && source === 'server' && before.phase !== 'decide') notify(`round:${res.payload.published_at}`, `Round ${res.payload.round} is ready for you to decide.`);
       // The first proposals on this page: the panel follows the saved preference now that it has something to show.
       if (!before) panelShown = panelShown || ui.open;
     }
@@ -1476,6 +1509,54 @@ function secondChairBootstrap() {
     renderPanel();
     schedulePoll();
     loadPublished();
+    loadAttention();
+  }
+
+  /** Whether the agent waits for you in the terminal. Asked on every sync while the work is with the agent. */
+  async function loadAttention() {
+    const ph = phase();
+    if (!state || (ph !== 'waiting' && ph !== 'publishing')) {
+      if (live.attention) {
+        live.attention = null;
+        renderPanel();
+      }
+      return;
+    }
+    const here = loc;
+    try {
+      const a = await api('GET', `/api/attention?repo=${encodeURIComponent(here.repo)}&pr=${here.number}`);
+      if (here !== loc || a.status !== 200) return;
+      const next = a.body?.attention ?? null;
+      if ((next?.at ?? null) === (live.attention?.at ?? null)) return;
+      live.attention = next;
+      if (next) notify(`attention:${next.at}`, `The agent needs you in the terminal.${next.message ? ` ${next.message}` : ''}`);
+      renderPanel();
+    } catch {
+      // The server is down; the dot says so.
+    }
+  }
+
+  /** The (!) in the tab title. GitHub sets the title on every navigation, so each render puts it back. */
+  function markTitle(on) {
+    const want = titleWith(document.title, on);
+    // Compared trimmed, as the browser reads the title back, so a render never sets the same title twice.
+    if (want.trim() !== document.title.trim()) document.title = want;
+  }
+
+  /**
+   * A desktop notification, once per event across every tab of this pull request, and only when you look elsewhere.
+   * Tabs share the GM storage, so the first tab that sees the event notifies and the others stay quiet.
+   */
+  function notify(key, text) {
+    if (typeof GM_notification === 'undefined' || document.hasFocus()) return;
+    const seenKey = `sc:notified:${loc.repo}#${loc.number}`;
+    if (GM_getValue(seenKey, null) === key) return;
+    GM_setValue(seenKey, key);
+    try {
+      GM_notification({ title: `Second Chair · ${loc.repo}#${loc.number}`, text, onclick: () => window.focus() });
+    } catch {
+      // A script manager without notifications: the title and the panel still say it.
+    }
   }
 
   /** Once per page: what publish recorded, for a round the agent publishes or already closed. Polling does it later on. */
@@ -1500,8 +1581,8 @@ function secondChairBootstrap() {
   // Idempotent: the page renders on every change GitHub makes, and each render must not restart the wait.
   function schedulePoll() {
     const ph = phase();
-    if (pollTimer || !loc || (ph !== 'waiting' && ph !== 'publishing') || document.visibilityState !== 'visible') return;
-    pollTimer = setTimeout(() => { pollTimer = null; poll(); }, POLL_MS);
+    if (pollTimer || !loc || (ph !== 'waiting' && ph !== 'publishing')) return;
+    pollTimer = setTimeout(() => { pollTimer = null; poll(); }, document.visibilityState === 'visible' ? POLL_MS : POLL_HIDDEN_MS);
   }
 
   function stopPoll() {
@@ -1537,7 +1618,10 @@ function secondChairBootstrap() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') poll();
-    else stopPoll();
+    else {
+      stopPoll();
+      schedulePoll();
+    }
   });
 
   async function sendDecisions() {
@@ -2165,6 +2249,7 @@ function secondChairBootstrap() {
       closeDiff();
       patchCache = null;
       removeShell();
+      markTitle(false);
       return;
     }
     if (!loc || now.repo !== loc.repo || now.number !== loc.number) {
@@ -2174,7 +2259,8 @@ function secondChairBootstrap() {
       state = load();
       openId = null;
       message = null;
-      live = { pickedUpAt: null, revision: null, published: null };
+      live = { pickedUpAt: null, revision: null, published: null, attention: null };
+      markTitle(false);
       stopPoll();
       showDoneCards = false;
       expanded.clear();

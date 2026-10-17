@@ -17,6 +17,7 @@ This skill covers the mechanics only. How you investigate a thread and what you 
 - Never push commits before round 2 is decided.
 - Never push while round 2 holds a `change`.
 - Never delete or submit the user's pending review to get past an error. Tell the user instead.
+- When you stop to ask the user something, or to wait for their instruction, while the work is with you (the user sent a round, and you have not pushed the next one or closed), first run `second-chair attention --repo O/N --pr N --message "<one line: what you need>"`. The panel then tells the user to come to the terminal, instead of a spinner that never ends. The next `push`, `publish` or `close` clears it. A failed `publish` sets it by itself. So does the plugin's hook when Claude Code waits for input or permission, but your line says more.
 
 ## Steps
 
@@ -61,4 +62,4 @@ The user can send a round again while you work on it (**Edit and send again**). 
 
 `publish` refuses while the user has a pending review on the pull request, because GitHub posts no reply while one exists. It posts nothing in that case. Tell the user to submit or delete that review on GitHub, then stop. Run `publish` again only after the user says it is done.
 
-For any other error, show the user the message and wait for their instruction.
+For any other error, run `second-chair attention` with a one-line summary, show the user the message, and wait for their instruction.

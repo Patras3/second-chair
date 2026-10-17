@@ -226,6 +226,21 @@ The user can send a round again while the agent works on it (**Edit and send aga
 
 When the server is not running, the page copies the decisions to the clipboard instead. The user pastes them to the agent. The agent saves them to a file and runs `second-chair put-decisions <file>` once the server runs. The server checks them as above, and the work goes on as if the page had sent them.
 
+## Waiting for the user in the terminal
+
+After a send, the page shows the agent's turn and a spinner. When the agent stops to ask the user something, the page would wait forever. The agent says so instead, and the page tells the user to come back to the terminal:
+
+- `second-chair attention --repo O/N --pr N --message "<one line>"` sets the request. `--clear` removes it.
+- A failed `publish` sets it with the error, `"source": "error"`.
+- The plugin's hook sets it when Claude Code waits for input or for a permission (`Notification`), with Claude Code's own line, `"source": "hook"`. It clears it when the user types in that session (`UserPromptSubmit`). A hook never replaces a request from the agent or from `publish`, because their line says more.
+- The next `push`, a `publish` record and `close` clear it.
+
+The page shows a request only while the work is with the agent (`waiting` or `publishing`): the status line becomes "Your turn in the terminal", the pill says **needs you**, the footer loses its spinner, the tab title starts with `(!)`, and a desktop notification goes out when the page is not in focus. The page polls every 5 seconds while the tab is visible, and every 30 seconds while it is hidden, so a notification reaches a user who looks elsewhere. A new round that arrives while the page is not in focus gets a notification too.
+
+The hook knows its session id, not the pull request. The server therefore remembers which agent session works on each pull request. `push` and a `wait` or `get` that returns the decisions send the session as `session=<id>`. The command takes it from `SECOND_CHAIR_SESSION`, or from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets. A hook event marks only the pull requests where that session holds the work: the user sent the latest round, and the work is not closed.
+
+Another agent can use the same calls: set `SECOND_CHAIR_SESSION`, and call `POST /api/session` from its own hooks.
+
 ## Server API
 
 The server listens on `http://127.0.0.1:7788`. `SECOND_CHAIR_PORT` or `serve --port` changes the port.
@@ -244,16 +259,20 @@ Rules for every request:
 | `GET /health` | | `200 {"ok": true, "tool": "second-chair", "pid": N, "version": "1.0.0"}`. `pid` is the server's process id. `stop` signals a process only when this `pid` matches the pid file. `version` is the version in the server's `package.json`. `start` restarts a server whose version is older than its own, or missing. It keeps a newer server. Needs no `X-Second-Chair` header. |
 | `GET /second-chair.user.js` | | `200` with the userscript, with the server's port written into it. Needs no `X-Second-Chair` header. |
 | `GET /api/proposals` | `?repo=O/N&pr=N[&round=R]` | `200` with the payload, `400` without a valid `repo` and `pr` or with a `round` that is not a whole number of 1 or more, `404` when there is none. Without `round`: the most recently pushed round, so a new round 1 wins over an older round 2. |
-| `PUT /api/proposals` | a proposals payload | `200 {"ok": true, "published_at": "…"}`, `400` with the reason, or `409` while round R or R-1 has a changed revision the agent has not read (see [Changed decisions](#changed-decisions)). It replaces that round's proposals and deletes that round's decisions. A round 1 starts a new cycle, so it also deletes the record of what `publish` did in the last cycle. |
+| `PUT /api/proposals` | a proposals payload, `[?session=ID]` | `200 {"ok": true, "published_at": "…"}`, `400` with the reason, or `409` while round R or R-1 has a changed revision the agent has not read (see [Changed decisions](#changed-decisions)). It replaces that round's proposals, deletes that round's decisions and clears a request for the user. `session` records the agent session. A round 1 starts a new cycle, so it also deletes the record of what `publish` did in the last cycle. |
 | `GET /api/changes` | `?repo=O/N&pr=N&round=R` | `200 {"published_at", "commits", "range"}` with the patches, `400` without a valid `repo`, `pr` and `round`, `404` when the round has none. The patches are stored apart in `r<round>-changes.json` with the server's `published_at`, and a `published_at` in the client's payload is overridden. The page uses them only when this `published_at` equals the proposals'. |
-| `GET /api/decisions` | `?repo=O/N&pr=N&round=R[&peek=1]` | `200` with the decisions, `400` without `repo`, `pr` and `round`, `404` when there are none yet. Without `peek=1` the first read of a revision sets its `picked_up_at`. |
+| `GET /api/decisions` | `?repo=O/N&pr=N&round=R[&peek=1][&session=ID]` | `200` with the decisions, `400` without `repo`, `pr` and `round`, `404` when there are none yet. Without `peek=1` the first read of a revision sets its `picked_up_at`, and `session` records the agent session that read it. |
 | `POST /api/decisions` | a decisions payload | `200 {"ok": true, "revision": N}`, or `409` with the reason (see above). |
 | `POST /api/close` | `{"repo": "O/N", "pr": N}` | `200 {"ok": true, "closed_at": "…"}`, `400` without `repo` and `pr`, `404` when the pull request has no proposals. |
 | `GET /api/published` | `?repo=O/N&pr=N&round=R` | `200 {"items": {"<thread_id>": {"action": "…", "url": "…", "at": "…"}}}`, `400` without `repo`, `pr` and `round`. |
 | `POST /api/published` | `{"repo", "pr", "round", "thread_id", "action", "url"}` | `200 {"ok": true}`, or `409` for an unknown pull request, round or `thread_id`, or an empty `action`. In review mode, `{"thread_id": "REVIEW", "action": "submitted", "event": "COMMENT"}` records the submit. |
 | `GET /api/drafted` | `?repo=O/N&pr=N` | `200 {"ids": [...]}`: the pending comments that `draft` added for Second Chair. `400` without `repo` and `pr`. |
 | `POST /api/drafted` | `{"repo", "pr", "ids"}` | `200 {"ok": true}`. Replaces the list. `400` when an id is not a whole number of 1 or more. |
-| `GET /api/status` | | `200` with one entry per pull request and round: `repo`, `pr`, `round`, `head`, `items`, `published_at`, `decided_at`, `revision`, `picked_up_at`, `closed_at`. |
+| `GET /api/attention` | `?repo=O/N&pr=N` | `200 {"attention": {"at", "message", "source"}}`, or `{"attention": null}`. `400` without `repo` and `pr`. |
+| `POST /api/attention` | `{"repo", "pr", "message", "source", "session"}` | `200 {"ok": true, "at": "…"}`. `message` (optional, trimmed, at most 300 characters kept) is shown to the user. `source` is `agent` (the default), `error` or `hook`. `session` (optional) records the agent session. `400` for a bad field, `404` when the pull request has no proposals. |
+| `DELETE /api/attention` | `?repo=O/N&pr=N` | `200 {"ok": true}`. `400` without `repo` and `pr`. |
+| `POST /api/session` | `{"session", "event", "message"}` | For the agent's hooks. `event` `waiting` sets a request with `source: "hook"` on every pull request this session holds, unless it has one from the agent or from `publish`. `back` clears them. `200 {"ok": true, "prs": [{"repo", "pr"}]}`, `400` for a bad session id (letters, digits, `.`, `_`, `:` and `-`, at most 128) or event. |
+| `GET /api/status` | | `200` with one entry per pull request and round: `repo`, `pr`, `round`, `head`, `items`, `published_at`, `decided_at`, `revision`, `picked_up_at`, `closed_at`, `attention_at`. |
 
 `publish` records these actions in `/api/published`: `replied`, `dropped`, `updated`, `kept`, `body set` and `body cleared`, and `submitted` under `REVIEW`.
 
@@ -266,6 +285,8 @@ The server stores plain JSON files under the data directory (`SECOND_CHAIR_HOME`
 <owner>/<name>/<pr>/r<round>-published.json
 <owner>/<name>/<pr>/closed.json
 <owner>/<name>/<pr>/drafted.json
+<owner>/<name>/<pr>/attention.json
+<owner>/<name>/<pr>/agent.json
 ```
 
 The same directory holds `server.log` from `second-chair start`, and `backups/` from `draft`. It also holds `server.pid` while a server that `start` launched runs. That server writes the file once it listens on the port, and removes it when it stops. On Windows, `stop` removes it, and so does the next `start` when the file names another process than the server on the port.

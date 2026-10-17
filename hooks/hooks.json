@@ -7,6 +7,20 @@
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/second-chair\" start --quiet", "timeout": 30 }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/second-chair\" hook", "timeout": 5 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/second-chair\" hook", "timeout": 5 }
+        ]
+      }
     ]
   }
 }

@@ -91,6 +91,15 @@ Use a pull request by another account.
 - [ ] Review: round 2 with **Comment** chosen in **Your review**. After `publish`, the review on GitHub is submitted as a comment, and the panel says "Submitted as Comment".
 - [ ] Review: run `/second-chair:review` on the same pull request a second time. No line has two comments. The cards of the first pass say **earlier pass**.
 
+### The agent needs you
+
+- [ ] Respond: after the round 1 send, ask the agent to run `second-chair attention` with a message. Within 5 seconds the status line says **Your turn in the terminal** with the message, the pill says **needs you**, the spinner is gone and the tab title starts with `(!)`.
+- [ ] The same with the tab in the background: a desktop notification shows within about 30 seconds. A click on it brings the tab forward.
+- [ ] Type anything in the agent's session. The request goes away within 5 seconds, and the spinner is back.
+- [ ] While the agent works on round 1, let it run a command that needs your permission. The page says **needs you** with Claude Code's line, without the agent running `attention`.
+- [ ] With the tab in the background, the agent pushes round 2. A notification says round 2 is ready.
+- [ ] Another session that waits for input does not mark this pull request.
+
 ### Cards after the end
 
 - [ ] After the final send, no card stays on the page and the pill reads **publishing**. After the agent's `close`, it reads **✓ done**, and the panel lists the posted replies with links.
