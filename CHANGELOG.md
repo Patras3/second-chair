@@ -10,7 +10,7 @@ Added:
 
 Changed:
 
-- A hidden tab keeps polling, every 30 seconds instead of every 5, so a notification can reach you.
+- A hidden tab no longer stops polling. It asks every 30 seconds, so a notification can reach you.
 - The skills run `second-chair attention` before they stop to ask you something while a round is with the agent.
 
 ## 1.2.0
