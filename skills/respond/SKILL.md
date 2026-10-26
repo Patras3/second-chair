@@ -19,6 +19,12 @@ This skill covers the mechanics only. How you investigate a thread and what you 
 - Never delete or submit the user's pending review to get past an error. Tell the user instead.
 - When you stop to ask the user something, or to wait for their instruction, while the work is with you (the user sent a round, and you have not pushed the next one or closed), first run `second-chair attention --repo O/N --pr N --message "<one line: what you need>"`. The panel then tells the user to come to the terminal, instead of a spinner that never ends. The next `push`, `publish` or `close` clears it. A failed `publish` sets it by itself. So does the plugin's hook when Claude Code waits for input or permission, but your line says more.
 
+## Replies
+
+- Do not open a reply by agreeing: no "You are right", "Good catch", "Agreed". Start with the facts or with what changes.
+- When the reviewer read the text differently from what it meant, say first what it meant, with the evidence. Then say whether the wording changes, so the next reader does not read it the same way. A misread is not an error in the work.
+- Agree only with what you checked. When the data says something different from the reviewer's claim, give the data, also when you make the change they asked for.
+
 ## Steps
 
 1. Run `second-chair doctor`. Fix what it reports, or run `/second-chair:setup`.

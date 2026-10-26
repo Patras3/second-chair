@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.1
+
+Changed:
+
+- The respond skill has rules for replies. A reply does not open with "You are right" or "Agreed". When the reviewer read the text differently from what it meant, the reply says first what it meant, with the evidence. When the data says something different from the reviewer's claim, the reply gives the data, also when the change is made.
+
 ## 1.3.0
 
 Added:
