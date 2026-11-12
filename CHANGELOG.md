@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0
+
+Changed:
+
+- Round 2 no longer asks you to approve a text twice. When an item's text is the same as the one you approved in round 1, or in the round 2 that the agent replaced, the server marks it `kept`. The page counts it as decided and shows it as one line, "unchanged · Keep" or "unchanged · Publish". You can still pick another button. A changed text, a Revise, a Fix and a reply that cites a commit wait for you as before. The agent cannot set `kept`.
+
 ## 1.3.1
 
 Changed:

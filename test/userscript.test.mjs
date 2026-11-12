@@ -185,6 +185,17 @@ test('auto never decides a posting choice in the final round', () => {
   assert.deepEqual(effective(r1, r1.payload.items[0]), { decision: 'post', auto: true }, 'round 1 posts nothing');
 });
 
+test('a kept item counts as decided with a posting choice, and its line says unchanged', () => {
+  const rv = stateFor(payload({ mode: 'review', round: 2, items: [{ thread_id: 'C1', comment_id: 1, verdict: 'post', auto: true, kept: true, reply_en: 'x' }, { thread_id: 'C2', comment_id: 2, verdict: 'post', reply_en: 'y' }] }), null);
+  assert.deepEqual(effective(rv, rv.payload.items[0]), { decision: 'post', auto: true });
+  assert.deepEqual(progress(rv), { done: 1, auto: 1, total: 2, complete: false });
+  assert.match(buildCard(rv, rv.payload.items[0], 'inline', {}), /sc-compact[\s\S]*unchanged · Keep/);
+  rv.decisions.C1.decision = 'revise';
+  assert.deepEqual(effective(rv, rv.payload.items[0]), { decision: 'revise', auto: false }, 'the user can still pick another button');
+  const r2 = stateFor(payload({ round: 2, items: [{ thread_id: 'A', verdict: 'publish', auto: true, kept: true, reply_en: 'x' }] }), null);
+  assert.deepEqual(effective(r2, r2.payload.items[0]), { decision: 'publish', auto: true });
+});
+
 test('filters split auto, yours and undecided', () => {
   const s = stateFor(autoPayload(), null);
   const ids = (f) => visibleItems(s, f).map((i) => i.thread_id);

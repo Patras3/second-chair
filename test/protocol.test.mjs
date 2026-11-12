@@ -210,3 +210,39 @@ test('a range note on the old name of a renamed file is accepted, a commit note 
   assert.equal(decisionsError(rdec(ok, [note({ path: 'N.txt', view: 'range' })]), p), null);
   assert.match(decisionsError(rdec(ok, [note({ path: 'O.txt', view: 'commit' })]), p), /does not change/);
 });
+
+test('markKept marks a final-round text the user already approved, and nothing else', async () => {
+  const { markKept } = await import('../lib/protocol.mjs');
+  const p = (items, over = {}) => ({ tool: TOOL, kind: 'proposals', repo: 'o/n', pr: 1, round: 2, mode: 'review', head: 'h', items, ...over });
+  const d = (decisions, over = {}) => ({ tool: TOOL, kind: 'decisions', repo: 'o/n', pr: 1, round: 1, head: 'h', decisions, ...over });
+  const r1 = d([
+    { thread_id: 'SAME', decision: 'post', reply_en: 'text\n' },
+    { thread_id: 'NEW', decision: 'post', reply_en: 'old text' },
+    { thread_id: 'REV', decision: 'revise', reply_en: 'text', note: 'shorter' },
+    { thread_id: 'DROP', decision: 'drop', reply_en: 'text' },
+  ]);
+  const items = ['SAME', 'NEW', 'REV', 'FRESH'].map((thread_id) => ({ thread_id, verdict: 'post', reply_en: 'text' }));
+  items.push({ thread_id: 'DROP', verdict: 'drop', auto: true, reply_en: 'text' });
+  const out = markKept(p(items), [null, r1]);
+  assert.deepEqual(out.items.map((it) => [it.thread_id, it.kept ?? false, it.auto ?? false]),
+    [['SAME', true, true], ['NEW', false, false], ['REV', false, false], ['FRESH', false, false], ['DROP', false, true]]);
+
+  assert.equal(markKept(p(items, { head: 'other' }), [r1]).items[0].kept, undefined, 'another head');
+  assert.equal(markKept(p(items, { round: 1 }), [r1]).items[0].kept, undefined, 'not the final round');
+  // The newest decision on a thread wins: a Revise in the replaced round 2 undoes the Post of round 1.
+  const r2 = d([{ thread_id: 'SAME', decision: 'revise', reply_en: 'text', note: 'x' }], { round: 2 });
+  assert.equal(markKept(p(items), [r2, r1]).items[0].kept, undefined);
+
+  const reply = p([
+    { thread_id: 'A', verdict: 'publish', reply_en: 'text' },
+    { thread_id: 'B', verdict: 'publish', reply_en: 'text', commits: ['a'.repeat(40)] },
+    { thread_id: 'C', verdict: 'publish', reply_en: 'text' },
+  ], { mode: 'reply' });
+  const first = d([{ thread_id: 'A', decision: 'pushback', reply_en: 'text' }, { thread_id: 'B', decision: 'reply', reply_en: 'text' }, { thread_id: 'C', decision: 'fix', reply_en: 'text' }]);
+  assert.deepEqual(markKept(reply, [first]).items.map((it) => it.kept ?? false), [true, false, false], 'a cited commit or a Fix is new to the user');
+});
+
+test('a payload that arrives with kept is refused', () => {
+  const p = { tool: TOOL, kind: 'proposals', repo: 'o/n', pr: 1, round: 2, mode: 'review', head: 'h', items: [{ thread_id: 'C1', verdict: 'post', kept: true, reply_en: 'x' }] };
+  assert.equal(proposalsError(p), 'C1: kept is set by the server, never by the agent');
+});

@@ -39,7 +39,8 @@ const SC_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fil
 // Decision buttons per mode and round. `reply` answers the threads on your own pull request; `review`
 // decides the comments of a pending review you are about to submit. A decision with `needsNote` counts
 // only once the note says what to change. A decision with `posts` puts text on GitHub, so `auto` never
-// picks it: the user approves every posted text. A `derived` decision has no button: the page sets it from the
+// picks it: the user approves every posted text. The one exception is an item the server marks `kept`: the user
+// approved that very text before. A `derived` decision has no button: the page sets it from the
 // notes on the code.
 const SC_DECISIONS = {
   reply: {
@@ -494,14 +495,15 @@ function notesFor(state, item) {
   return Object.values(state.codeNotes ?? {}).filter((n) => item.commits.includes(n.sha));
 }
 
-/** The decision that counts for an item: yours, or the proposal when the agent marked it `auto` and it posts nothing. */
+/** The decision that counts for an item: yours, or the proposal when the item is `auto` and either posts nothing or is `kept`. */
 function effective(state, item) {
   // A note on the code wins over any choice. The choice stays stored and counts again once the notes are deleted.
   if (notesFor(state, item).length) return { decision: 'change', auto: false };
   const d = state.decisions[item.thread_id];
   if (d?.decision) return { decision: d.decision, auto: false };
   const b = item.auto && item.verdict ? decisionsFor(state.payload).find((x) => x.key === item.verdict) : null;
-  if (b && !b.posts) return { decision: item.verdict, auto: true };
+  // `kept` comes from the server: the user approved this very text before, so a posting choice may count too.
+  if (b && (!b.posts || item.kept === true)) return { decision: item.verdict, auto: true };
   return { decision: null, auto: false };
 }
 
@@ -659,7 +661,7 @@ function buildCard(state, item, where, view = {}) {
   const mark = SC_LOGO;
   if (compact) {
     const first = String(d.reply || field(item, 'summary')).split('\n').find((l) => l.trim()) ?? '';
-    const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(p, e.decision))}</span>` : '';
+    const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? (item.kept ? 'unchanged · ' : 'auto · ') : ''}${esc(decisionLabel(p, e.decision))}</span>` : '';
     return `${open}<div class="sc-oneline">${mark}${label}<span class="sc-oneline-text">${richText(first)}</span><button type="button" class="sc-link" data-sc-act="expand" data-sc-id="${id}">expand</button></div></div>`;
   }
   const context = [field(item, 'context'), field(item, 'fix') ? `**Plan:** ${field(item, 'fix')}` : ''].filter(Boolean).join('\n\n');
@@ -748,7 +750,7 @@ function rowParts(state, it, v) {
   const needNote = missingNote(state, it);
   const decided = Boolean(e.decision) && !needNote;
   const icon = v.done ? SC_ICON.done('var(--fgColor-done,#8250df)') : !decided ? SC_ICON.open : SC_ICON.done(e.auto ? 'var(--fgColor-muted,#8c959f)' : 'var(--fgColor-success,#1a7f37)');
-  const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? 'auto · ' : ''}${esc(decisionLabel(state.payload, e.decision))}${needNote ? ' · needs a note' : ''}</span>` : '<span class="sc-muted">—</span>';
+  const label = e.decision ? `<span class="sc-label${e.auto ? ' sc-auto' : ''} sc-v-${esc(e.decision)}">${e.auto ? (it.kept ? 'unchanged · ' : 'auto · ') : ''}${esc(decisionLabel(state.payload, e.decision))}${needNote ? ' · needs a note' : ''}</span>` : '<span class="sc-muted">—</span>';
   return { decided, icon, label };
 }
 

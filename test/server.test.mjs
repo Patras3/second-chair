@@ -438,3 +438,47 @@ test('reading the decisions moves the work to the reading session, and a hook ke
   assert.deepEqual((await call('POST', '/api/session', { session: 'new', event: 'waiting', message: 'Claude is waiting for your input' })).body.prs, [{ repo: 'acme/w', pr: 206 }]);
   assert.equal((await call('GET', '/api/attention?repo=acme/w&pr=206')).body.attention.message, 'Which name do you want?');
 });
+
+test('round 2 marks a text as kept when the user approved it as it is, in round 1 or in the round 2 it replaces', async () => {
+  const pr = 30;
+  const item = (thread_id, reply_en, verdict = 'post') => ({ thread_id, verdict, reply_en });
+  const r2items = async () => Object.fromEntries((await call('GET', `/api/proposals?repo=acme/w&pr=${pr}&round=2`)).body.items.map((it) => [it.thread_id, [it.kept ?? false, it.auto ?? false]]));
+  await call('PUT', '/api/proposals', proposals({ pr, mode: 'review', items: [item('C1', 'one'), item('C2', 'two'), item('BODY', 'body')] }));
+  await call('POST', '/api/decisions', decisions({ pr, decisions: [
+    { thread_id: 'C1', decision: 'post', reply_en: 'one' },
+    { thread_id: 'C2', decision: 'revise', note: 'shorter', reply_en: 'two' },
+    { thread_id: 'BODY', decision: 'post', reply_en: 'body' },
+  ] }));
+  await call('GET', `/api/decisions?repo=acme/w&pr=${pr}&round=1`);
+  const round2 = (second) => proposals({ pr, mode: 'review', round: 2, items: [item('C1', 'one'), item('C2', second), item('BODY', 'body')] });
+  assert.equal((await call('PUT', '/api/proposals', round2('2'))).status, 200);
+  assert.deepEqual(await r2items(), { C1: [true, true], C2: [false, false], BODY: [true, true] });
+
+  // The user asks for one more change. The texts approved in round 2 stay kept in its next version.
+  await call('POST', '/api/decisions', decisions({ pr, round: 2, decisions: [
+    { thread_id: 'C1', decision: 'revise', note: 'again', reply_en: 'one' },
+    { thread_id: 'C2', decision: 'post', reply_en: '2' },
+    { thread_id: 'BODY', decision: 'post', reply_en: 'body' },
+  ] }));
+  await call('GET', `/api/decisions?repo=acme/w&pr=${pr}&round=2`);
+  await call('PUT', '/api/proposals', round2('2'));
+  assert.deepEqual(await r2items(), { C1: [false, false], C2: [true, true], BODY: [true, true] }, 'the Revise of round 2 wins over the Post of round 1');
+
+  assert.match((await call('PUT', '/api/proposals', proposals({ pr, mode: 'review', round: 2, items: [{ ...item('C1', 'one'), kept: true }] }))).body.error, /kept is set by the server/);
+});
+
+test('round 2 decisions of an earlier cycle do not mark a text as kept', async () => {
+  const pr = 31;
+  const items = [{ thread_id: 'C1', verdict: 'post', reply_en: 'one' }];
+  const post = [{ thread_id: 'C1', decision: 'post', reply_en: 'one' }];
+  const revise = [{ thread_id: 'C1', decision: 'revise', note: 'x', reply_en: 'one' }];
+  await call('PUT', '/api/proposals', proposals({ pr, mode: 'review', items }));
+  await call('POST', '/api/decisions', decisions({ pr, decisions: post }));
+  await call('PUT', '/api/proposals', proposals({ pr, mode: 'review', round: 2, items }));
+  await call('POST', '/api/decisions', decisions({ pr, round: 2, decisions: post }));
+  // A new cycle: round 1 again, and this time the user asks for a change.
+  await call('PUT', '/api/proposals', proposals({ pr, mode: 'review', items }));
+  await call('POST', '/api/decisions', decisions({ pr, decisions: revise }));
+  await call('PUT', '/api/proposals', proposals({ pr, mode: 'review', round: 2, items }));
+  assert.equal((await call('GET', `/api/proposals?repo=acme/w&pr=${pr}&round=2`)).body.items[0].kept, undefined);
+});

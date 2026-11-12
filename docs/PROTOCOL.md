@@ -94,7 +94,8 @@ The agent writes items, and `second-chair build` wraps them into a proposals pay
 | `context` | string | Markdown for the user only, never posted: what the agent checked and found. |
 | `fix` | string | Markdown: the planned change, for `fix`. The card shows it under the context as "Plan". |
 | `reply_en` | string | Required. Markdown: the reply or comment as it will be posted. For the `BODY` item: the proposed review body. |
-| `auto` | boolean | `true` when the item needs no decision from the user. It counts as decided with its `verdict`, and the card shows one line. The user can still pick another button. In round 2, a verdict that posts text (`publish` in `reply` mode, `post` in `review` mode) cannot be `auto`. |
+| `auto` | boolean | `true` when the item needs no decision from the user. It counts as decided with its `verdict`, and the card shows one line. The user can still pick another button. In round 2, the agent cannot set it on a verdict that posts text (`publish` in `reply` mode, `post` in `review` mode). The server sets it there together with `kept`. |
+| `kept` | boolean | Set by the server, never by the agent. `true` on a round 2 item that posts a text the user already approved as it is. The item is then `auto` too, and its line says "unchanged". See [Kept texts](#kept-texts). |
 | `commits` | array of strings | Full shas. With `--base`, `build` turns each entry, a unique prefix of 7 or more characters, into the full sha of a commit in `changes`. The card shows each as a row with **View changes**. |
 | `origin` | string | `"agent"` (the default), `"user"` or `"earlier"`. `"user"` marks a comment or a review body that the user wrote. Its card says "Your draft comment". `"earlier"` marks a comment that Second Chair added in an earlier review pass. Its card says "Second Chair · earlier pass". |
 | `original_en` | string | For `origin: "user"` or `"earlier"`: the text the comment has now. When `reply_en` is a different text, the card shows it in a folded block, "Your original" or "Earlier text". |
@@ -115,6 +116,7 @@ Older payloads spell `summary`, `context` and `fix` as `summary_pl`, `context_pl
 - `suggested_submit` is not a submit event, `needs_submit` is not a boolean, or either sits on an item other than `BODY`;
 - two items share a `thread_id`;
 - a round 2 item has `auto: true` with the verdict `publish` (`reply` mode) or `post` (`review` mode). The user approves every text that gets posted;
+- an item has `kept`. Only the server sets it;
 - `changes` has a bad shape, or sits outside round 2 of respond mode.
 
 With `--base SHA`, `build` also refuses when:
@@ -127,7 +129,18 @@ With `--base SHA`, `build` also refuses when:
 
 When the base equals HEAD, `build` leaves `changes` out. `--base` is allowed only in respond mode, round 2. `build` runs git from the repository's top level, through `execFile` and never a shell, with fixed options and `--literal-pathspecs`.
 
-`build` puts the general items first. The server checks less: `tool`, `kind`, `repo`, `pr`, `mode`, `round`, at least one item, unique `thread_id` values and the `auto` rule above. The page also never counts such an item as decided until the user picks a button.
+`build` puts the general items first. The server checks less: `tool`, `kind`, `repo`, `pr`, `mode`, `round`, at least one item, unique `thread_id` values, the `auto` rule above and the `kept` rule. The page also never counts an `auto` item that posts text as decided until the user picks a button, unless the item is `kept`.
+
+### Kept texts
+
+When round 2 arrives, the server marks an item `kept: true` and `auto: true` when all of these hold:
+
+- its verdict posts text (`publish` or `post`), and it cites no `commits`;
+- the newest decision the user made on that thread approved the text: `post` in `review` mode, and `reply`, `pushback` or `publish` in `reply` mode. The server looks at the decisions of the round 2 that this push replaces, and then at those of round 1;
+- that decision was made for the same `head`;
+- its `reply_en` equals the item's `reply_en`. Whitespace at the end does not count.
+
+So the user does not approve the same text twice. A text that changed, a `revise`, a `fix` and a reply that cites a commit still wait for a button. The user can pick another button on a kept item at any time.
 
 ## Decisions
 

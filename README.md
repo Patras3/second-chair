@@ -110,7 +110,7 @@ The agent reads every unresolved thread and writes a proposal for each one. Open
 - The buttons **Reply**, **Fix**, **Push back** and **Manual**. The agent's proposal has a dashed outline. Each button explains itself in its tooltip. **Manual** means you handle the thread yourself.
 - **Note for the agent**: an instruction, for example "fix it, but keep the old method". It is never posted.
 
-The agent marks an item **auto** when it has no doubt, such as a typo. An auto item counts as decided with the agent's proposal and shows as one line. Pick another button to override it.
+The agent marks an item **auto** when it has no doubt, such as a typo. An auto item counts as decided with the agent's proposal and shows as one line. Pick another button to override it. In round 2 a text that you already approved as it is shows the same way, marked **unchanged**, so you do not approve it twice.
 
 **Send decisions** at the bottom of the side panel unlocks when every thread has a decision. The agent then makes the fixes you approved and commits them. It does not push yet.
 
