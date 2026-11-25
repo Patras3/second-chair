@@ -467,6 +467,27 @@ test('round 2 marks a text as kept when the user approved it as it is, in round 
   assert.match((await call('PUT', '/api/proposals', proposals({ pr, mode: 'review', round: 2, items: [{ ...item('C1', 'one'), kept: true }] }))).body.error, /kept is set by the server/);
 });
 
+test('a fix commit on one thread keeps the unchanged replies of the others', async () => {
+  const pr = 32;
+  await call('PUT', '/api/proposals', proposals({ pr, items: [
+    { thread_id: 'T1', verdict: 'fix', reply_en: 'Will fix.' },
+    { thread_id: 'T2', verdict: 'pushback', reply_en: 'Not changing this: X.' },
+  ] }));
+  await call('POST', '/api/decisions', decisions({ pr, decisions: [
+    { thread_id: 'T1', decision: 'fix', reply_en: 'Will fix.' },
+    { thread_id: 'T2', decision: 'pushback', reply_en: 'Not changing this: X.' },
+  ] }));
+  await call('GET', `/api/decisions?repo=acme/w&pr=${pr}&round=1`);
+  // The agent committed the fix, so round 2 has a new head.
+  const sha = 'c'.repeat(40);
+  assert.equal((await call('PUT', '/api/proposals', proposals({ pr, round: 2, head: sha, items: [
+    { thread_id: 'T1', verdict: 'publish', reply_en: 'Thanks, done in ccccccc.', commits: [sha] },
+    { thread_id: 'T2', verdict: 'publish', reply_en: 'Not changing this: X.' },
+  ], changes: { base: 'a'.repeat(40), head: sha, add: 0, del: 0, commits: [{ sha, subject: 'Fix it', author: 'A', add: 0, del: 0, files: [] }], range: { files: [] } } }))).status, 200);
+  const got = (await call('GET', `/api/proposals?repo=acme/w&pr=${pr}&round=2`)).body.items.map((it) => [it.thread_id, it.kept ?? false]);
+  assert.deepEqual(got, [['T1', false], ['T2', true]]);
+});
+
 test('round 2 decisions of an earlier cycle do not mark a text as kept', async () => {
   const pr = 31;
   const items = [{ thread_id: 'C1', verdict: 'post', reply_en: 'one' }];

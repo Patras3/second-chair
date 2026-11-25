@@ -137,10 +137,9 @@ When round 2 arrives, the server marks an item `kept: true` and `auto: true` whe
 
 - its verdict posts text (`publish` or `post`), and it cites no `commits`;
 - the newest decision the user made on that thread approved the text: `post` in `review` mode, and `reply`, `pushback` or `publish` in `reply` mode. The server looks at the decisions of the round 2 that this push replaces, and then at those of round 1;
-- that decision was made for the same `head`;
 - its `reply_en` equals the item's `reply_en`. Whitespace at the end does not count.
 
-So the user does not approve the same text twice. A text that changed, a `revise`, a `fix` and a reply that cites a commit still wait for a button. The user can pick another button on a kept item at any time.
+The `head` does not count. A fix commit for one thread moves the head, but it does not change the approved texts of the other threads, so they stay kept. So the user does not approve the same text twice. A text that changed, a `revise`, a `fix` and a reply that cites a commit still wait for a button. The user can pick another button on a kept item at any time.
 
 ## Decisions
 

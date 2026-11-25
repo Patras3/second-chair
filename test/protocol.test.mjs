@@ -227,7 +227,7 @@ test('markKept marks a final-round text the user already approved, and nothing e
   assert.deepEqual(out.items.map((it) => [it.thread_id, it.kept ?? false, it.auto ?? false]),
     [['SAME', true, true], ['NEW', false, false], ['REV', false, false], ['FRESH', false, false], ['DROP', false, true]]);
 
-  assert.equal(markKept(p(items, { head: 'other' }), [r1]).items[0].kept, undefined, 'another head');
+  assert.equal(markKept(p(items, { head: 'other' }), [r1]).items[0].kept, true, 'a new commit moved the head, the text stayed');
   assert.equal(markKept(p(items, { round: 1 }), [r1]).items[0].kept, undefined, 'not the final round');
   // The newest decision on a thread wins: a Revise in the replaced round 2 undoes the Post of round 1.
   const r2 = d([{ thread_id: 'SAME', decision: 'revise', reply_en: 'text', note: 'x' }], { round: 2 });

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Changed:
+
+- Round 2 shows an approved text as unchanged after the agent commits fixes, too. In 1.4.0 the server marked a text `kept` only when the head was the same, so a fix commit on one thread made you approve every other unchanged text again. The head no longer counts. A reply that cites a commit still waits for you.
+
 Added:
 
 - The page picks up a new version of the round you decide. When the agent pushes the same round again, polling loads it, and a status line says so. A text the agent rewrote needs your decision again; the others keep theirs. While you edit a reply or type a note, the new version waits, and the new ↻ button in the panel header turns blue. The ↻ loads the latest proposals at any time, so you no longer clear the page and reload it.
