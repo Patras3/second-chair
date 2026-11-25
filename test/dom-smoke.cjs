@@ -394,6 +394,24 @@ const card = (id, where = 'inline') => `.sc-card[data-sc-where=${where}][data-sc
   check(await p2.locator('.sc-diff').count() === 0, 'a new round closes the popup');
   await p2.close();
 
+  // The agent pushes the round you decide again: polling loads it, and waits while you type.
+  const upd = { ...payload, pr: 8 };
+  await api('PUT', '/api/proposals', upd);
+  const p3 = await openPage(browser, port, null, 8);
+  await p3.waitForSelector(card('T2'));
+  await p3.click('.sc-toggle');
+  await api('PUT', '/api/proposals', { ...upd, items: upd.items.map((it) => (it.thread_id === 'T2' ? { ...it, reply_en: 'No, because of X.' } : it)) });
+  await p3.waitForFunction(() => document.querySelector('.sc-msg')?.textContent.includes('The agent updated round 1'), null, { timeout: 15000 }).catch(() => {});
+  check((await p3.textContent(card('T2'))).includes('because of X'), 'polling loads a new version of the round you decide');
+  await p3.click(`${card('T1')} [data-sc-act=edit]`);
+  await api('PUT', '/api/proposals', { ...upd, items: upd.items.map((it) => (it.thread_id === 'T2' ? { ...it, reply_en: 'No, because of Y.' } : it)) });
+  await p3.waitForSelector('.sc-refresh-ready', { timeout: 15000 }).catch(() => {});
+  check(await p3.locator('.sc-refresh-ready').count() === 1 && !(await p3.textContent(card('T2'))).includes('because of Y'), 'while you edit, the new version waits behind a highlighted refresh button');
+  await p3.click('.sc-refresh-ready');
+  await p3.waitForFunction(() => document.querySelector('.sc-card[data-sc-card=T2]')?.textContent.includes('because of Y'), null, { timeout: 5000 }).catch(() => {});
+  check((await p3.textContent(card('T2'))).includes('because of Y') && await p3.locator('.sc-refresh-ready').count() === 0, 'the refresh button loads it');
+  await p3.close();
+
   await browser.close();
   server.close();
   fs.rmSync(root, { recursive: true, force: true });

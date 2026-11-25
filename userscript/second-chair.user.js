@@ -913,6 +913,7 @@ html.sc-shift-narrow .sc-toggle{right:calc(min(440px,92vw) + 16px)}html.sc-shift
 .sc-title{font-size:14px;white-space:nowrap}.sc-done-label{white-space:nowrap}
 .sc-panel-head>.sc-hrow:first-child>.sc-muted{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sc-icon{width:28px;height:28px;border-radius:6px;border:1px solid transparent;background:none;color:var(--fgColor-muted,#59636e);cursor:pointer;font:16px/1 system-ui}
+.sc-icon.sc-refresh-ready{color:var(--fgColor-accent,#0969da);border-color:currentColor}
 .sc-icon:hover{background:var(--bgColor-muted,#f6f8fa);border-color:var(--borderColor-default,#d0d7de)}
 .sc-dot{width:8px;height:8px;border-radius:50%;background:var(--fgColor-muted,#8c959f)}.sc-dot.sc-up{background:var(--fgColor-success,#1a7f37)}.sc-dot.sc-down{background:var(--fgColor-danger,#d1242f)}
 .sc-progress{display:flex;height:8px;margin-top:10px;border-radius:4px;overflow:hidden;background:var(--bgColor-muted,#f6f8fa);border:1px solid var(--borderColor-default,#d0d7de)}
@@ -1088,6 +1089,8 @@ function secondChairBootstrap() {
   let rendering = false;
   let timer = null;
   let pollTimer = null;
+  // The server holds a newer version of the round you decide, kept back because you were typing. The ↻ loads it.
+  let updateReady = false;
   // What polling learned about this round: when the agent picked the decisions up, what publish recorded, and
   // whether the agent stopped to wait for you in the terminal.
   let live = { pickedUpAt: null, revision: null, published: null, attention: null };
@@ -1322,7 +1325,7 @@ function secondChairBootstrap() {
   <div class="sc-hrow">${SC_LOGO}<b class="sc-title">Second Chair</b>${state ? `<span class="sc-muted">#${state.payload.pr} · ${SC_MODE_NAME[modeOf(state.payload)]} · round ${state.payload.round}</span>` : ''}<span class="sc-grow"></span>
     ${info ? '<span class="sc-label sc-done-label">✓ Done</span>' : ''}
     <span class="sc-dot ${serverUp ? 'sc-up' : serverUp === false ? 'sc-down' : ''}" title="server ${serverUp ? 'on' : 'off'} · ${SC_SERVER}"></span>
-    ${state ? '<button type="button" class="sc-icon" data-sc-act="tour" aria-label="Show the tour" title="Show the tour">?</button>' : ''}<button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
+    ${state && ph !== 'done' ? `<button type="button" class="sc-icon${updateReady ? ' sc-refresh-ready' : ''}" data-sc-act="fetch" aria-label="Load the latest proposals" title="${updateReady ? 'The agent updated this round. Load it.' : 'Load the latest proposals from the server'}">↻</button>` : ''}${state ? '<button type="button" class="sc-icon" data-sc-act="tour" aria-label="Show the tour" title="Show the tour">?</button>' : ''}<button type="button" class="sc-icon" data-sc-act="menu" aria-label="More">⋯</button><button type="button" class="sc-icon" data-sc-act="panel" aria-label="Close">✕</button></div>
   ${ph === 'decide' ? `<div class="sc-progress"><i style="width:${pct(pr.done - pr.auto)}%" class="sc-p-mine"></i><i style="width:${pct(pr.auto)}%" class="sc-p-auto"></i></div>
   <div class="sc-hrow sc-muted sc-small"><span><b class="sc-fg sc-n-done">${pr.done}</b> of ${pr.total} decided</span>${pr.auto ? `<span>· ${pr.auto} auto</span>` : ''}<span class="sc-grow"></span><span class="sc-left">${pr.total - pr.done ? `${pr.total - pr.done} left` : 'ready to send'}</span></div>` : ''}
   ${status}
@@ -1463,6 +1466,7 @@ function secondChairBootstrap() {
   }
 
   function adopt(res, source) {
+    updateReady = false;
     if (res.error) {
       message = { error: true, text: res.error, showPaste: true };
     } else if (res.payload.repo !== loc.repo || res.payload.pr !== loc.number) {
@@ -1485,6 +1489,9 @@ function secondChairBootstrap() {
         // The agent's next round arrived while the user waited: say so, and show it.
         message = { text: res.payload.round === before.round ? `A new round ${res.payload.round} is here.` : `Round ${res.payload.round} is here.` };
         panelShown = true;
+      } else if (newRound && source === 'server' && before.phase === 'decide' && res.payload.round === before.round) {
+        // The agent changed the round you decide: a text it rewrote needs your decision again, the others keep it.
+        message = { text: `The agent updated round ${res.payload.round}. Changed texts need your decision again.` };
       } else message = { text: `Loaded ${res.payload.items.length} ${modeOf(res.payload) === 'review' ? 'review comments' : 'threads'}, round ${res.payload.round}, from the ${source}.` };
       live = { pickedUpAt: null, revision: null, published: newRound ? null : live.published, attention: null };
       if (newRound && source === 'server' && before.phase !== 'decide') notify(`round:${res.payload.published_at}`, `Round ${res.payload.round} is ready for you to decide.`);
@@ -1501,7 +1508,11 @@ function secondChairBootstrap() {
       const r = await api('GET', `/api/proposals?repo=${encodeURIComponent(here.repo)}&pr=${here.number}`);
       if (here !== loc) return;
       serverUp = true;
-      if (r.status === 200 && r.body && (force || isNewer(r.body, state))) adopt(checkPayload(r.body), 'server');
+      if (r.status === 200 && r.body && (force || isNewer(r.body, state))) {
+        // A new version while you decide replaces the cards, so it waits while you type in one.
+        if (!force && state && phase() === 'decide' && typing()) updateReady = true;
+        else adopt(checkPayload(r.body), 'server');
+      }
       else if (force && r.status === 404) message = { text: 'The server has no proposals for this PR yet.' };
     } catch {
       if (here !== loc) return;
@@ -1512,6 +1523,12 @@ function secondChairBootstrap() {
     schedulePoll();
     loadPublished();
     loadAttention();
+  }
+
+  /** True while you edit a reply or type into a field of the panel or a card. */
+  function typing() {
+    const el = document.activeElement;
+    return editing.size > 0 || Boolean(el && /^(TEXTAREA|INPUT)$/.test(el.tagName) && el.closest('.sc-panel, .sc-card'));
   }
 
   /** Whether the agent waits for you in the terminal. Asked on every sync while the work is with the agent. */
@@ -1579,11 +1596,14 @@ function secondChairBootstrap() {
 
   const roundQuery = () => `repo=${encodeURIComponent(loc.repo)}&pr=${loc.number}&round=${state.payload.round}`;
 
-  /** While the agent works, asks the server every few seconds: a new round, the pick-up, what publish posted. */
+  /**
+   * While a round is open, asks the server every few seconds: a new version of the round you decide, or, while the
+   * agent works, a new round, the pick-up and what publish posted.
+   */
   // Idempotent: the page renders on every change GitHub makes, and each render must not restart the wait.
   function schedulePoll() {
     const ph = phase();
-    if (pollTimer || !loc || (ph !== 'waiting' && ph !== 'publishing')) return;
+    if (pollTimer || !loc || (ph !== 'decide' && ph !== 'waiting' && ph !== 'publishing')) return;
     pollTimer = setTimeout(() => { pollTimer = null; poll(); }, document.visibilityState === 'visible' ? POLL_MS : POLL_HIDDEN_MS);
   }
 
@@ -2262,6 +2282,7 @@ function secondChairBootstrap() {
       openId = null;
       message = null;
       live = { pickedUpAt: null, revision: null, published: null, attention: null };
+      updateReady = false;
       markTitle(false);
       stopPoll();
       showDoneCards = false;

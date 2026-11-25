@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- The page picks up a new version of the round you decide. When the agent pushes the same round again, polling loads it, and a status line says so. A text the agent rewrote needs your decision again; the others keep theirs. While you edit a reply or type a note, the new version waits, and the new ↻ button in the panel header turns blue. The ↻ loads the latest proposals at any time, so you no longer clear the page and reload it.
+
 ## 1.4.0
 
 Changed:
